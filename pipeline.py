@@ -1,13 +1,16 @@
-# -> backend/services/pipeline.py
+# -> repo root: pipeline.py
 import os
 import shutil
 import traceback
 import uuid
 
-from services import gemini_service, supabase_service, tts_service, video_service
-from services.languages import get_language
+import gemini_service
+import supabase_service
+import tts_service
+import video_service
+from languages import get_language
 
-TMP_DIR = os.path.join(os.path.dirname(__file__), "..", "storage", "tmp")
+TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "tmp")
 
 
 def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voice_engine: str):
@@ -98,3 +101,4 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
 
     finally:
         shutil.rmtree(job_tmp, ignore_errors=True)
+        

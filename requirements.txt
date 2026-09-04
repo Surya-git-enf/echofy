@@ -1,9 +1,8 @@
-# -> backend/requirements.txt
-fastapi
-uvicorn[standard]
-python-multipart
-requests
-gTTS
-google-generativeai
-python-dotenv
-supabase
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+python-multipart>=0.0.6
+google-genai>=1.0.0
+gTTS>=2.3.2
+requests>=2.31.0
+supabase>=2.0.0
+python-dotenv>=1.0.0

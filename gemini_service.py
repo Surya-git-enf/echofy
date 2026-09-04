@@ -9,7 +9,7 @@ import re
 
 import google.generativeai as genai
 
-MODEL_NAME = "gemini-3.6-flash"
+MODEL_NAME = "gemini-2.5-flash"
 
 SYSTEM_INSTRUCTION = (
     "You are a professional dubbing script generator. You transcribe spoken "

@@ -4,6 +4,6 @@ uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 requests==2.32.3
 gTTS==2.5.3
-google-generativeai==0.8.3
+google-generativeai==0.8.4
 python-dotenv==1.0.1
 supabase>=2.6.0

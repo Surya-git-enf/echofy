@@ -1,4 +1,4 @@
-# -> backend/main.py
+# -> repo root: main.py
 import os
 import uuid
 
@@ -10,10 +10,11 @@ from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from services import pipeline, supabase_service
-from services.languages import is_supported, public_language_list
+import pipeline
+import supabase_service
+from languages import is_supported, public_language_list
 
-BASE_DIR = os.path.dirname(__file__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCAL_TMP_DIR = os.path.join(BASE_DIR, "storage", "tmp")
 os.makedirs(LOCAL_TMP_DIR, exist_ok=True)
 
@@ -123,7 +124,10 @@ def get_dub_status(job_id: str):
     return _job_public_view(job)
 
 
-# Serve the static frontend from the same process so one command runs the whole MVP.
-FRONTEND_DIR = os.path.join(BASE_DIR, "..", "frontend")
+# Serve the static frontend from the same process, from a ./frontend folder
+# if you keep one alongside these files. Safe to leave in even if that
+# folder doesn't exist yet — it just won't mount.
+FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 if os.path.isdir(FRONTEND_DIR):
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+    

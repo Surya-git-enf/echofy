@@ -1,119 +1,137 @@
+# -> tts_service.py
 """
-Echofy TTS Service:
-Supports Fish Audio (zero-shot cloning & public voices with inline emotions)
-and falls back cleanly to Microsoft Edge Neural Voices (edge-tts) or gTTS.
+Four interchangeable TTS engines, all exposing the same
+generate_speech(text, language_key, out_path, engine) signature:
+
+  - "fish"   -> Fish Audio (best quality, supports emotion tags + cloning,
+                paid, requires FISH_AUDIO_API_KEY). Falls back to "edge"
+                automatically on any Fish Audio failure so a job never dies
+                just because Fish Audio hiccuped or quota ran out.
+  - "edge"   -> Microsoft Edge Neural voices (edge-tts). Free, no key.
+  - "sarvam" -> Sarvam AI bulbul:v3. Best accent accuracy for Indian
+                languages, paid, requires SARVAM_API_KEY.
+  - "gtts"   -> Google Translate TTS. Free, no key, most robotic.
 """
+import asyncio
+import base64
 import os
 import re
-import asyncio
+
 import requests
-import edge_tts
-from gtts import gTTS
-from languages import SUPPORTED_LANGUAGES
 
-# Public voice reference IDs on Fish Audio (changeable to any model on fish.audio/discovery)
-FISH_VOICE_IDS = {
-    "english": "933563129e564b19a115bedd57b7406a",
-    "hindi": "e1bcbe4e7c1a4e1a8fa003e8c07e0c45",
-    "telugu": "933563129e564b19a115bedd57b7406a",
-    "default": "933563129e564b19a115bedd57b7406a",
-}
+from languages import get_language
 
-# High-quality Microsoft Edge Neural Voices (no API key needed)
-EDGE_VOICES = {
-    "telugu": "te-IN-MohanNeural",
-    "hindi": "hi-IN-MadhurNeural",
-    "tamil": "ta-IN-ValluvarNeural",
-    "kannada": "kn-IN-GaganNeural",
-    "malayalam": "ml-IN-MidhunNeural",
-    "marathi": "mr-IN-AarohiNeural",
-    "bengali": "bn-IN-BashkarNeural",
-    "english": "en-IN-PrabhatNeural",
-    "spanish": "es-ES-AlvaroNeural",
-    "french": "fr-FR-HenriNeural",
-    "default": "en-US-AndrewNeural",
-}
+SARVAM_TTS_URL = "https://api.sarvam.ai/text-to-speech"
+
+EMOTION_TAG_PATTERN = re.compile(r"\[(excited|confident|laugh|sad|angry|calm|whisper|serious)\]\s*", re.IGNORECASE)
 
 
-def _strip_emotion_tags(text: str) -> str:
-    """Removes [tags] so edge-tts does not read emotion direction aloud."""
-    cleaned = re.sub(r"\[.*?\]", "", text).strip()
-    return cleaned if cleaned else text
+def strip_emotion_tags(text: str) -> str:
+    """Engines that don't understand [tag] markup should never see it literally spoken."""
+    return EMOTION_TAG_PATTERN.sub("", text).strip()
 
 
-def _generate_fish_audio(text: str, target_language: str, output_path: str, api_key: str) -> bool:
-    """Invokes Fish Audio v1 TTS with balanced latency and emotion tag parsing."""
-    url = "https://api.fish.audio/v1/tts"
-    ref_id = FISH_VOICE_IDS.get(target_language.lower(), FISH_VOICE_IDS["default"])
+# ---------------- Fish Audio ----------------
 
-    payload = {
-        "text": text,
-        "reference_id": ref_id,
-        "format": "mp3",
-        "latency": "balanced",
-        "prosody": {"speed": 1.0, "volume": 0},
-    }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "model": "s2.1-pro",
-    }
+def generate_speech_fish(text: str, language_key: str, out_path: str):
+    api_key = os.getenv("FISH_AUDIO_API_KEY")
+    if not api_key:
+        raise RuntimeError("FISH_AUDIO_API_KEY is not set.")
 
-    try:
-        res = requests.post(url, json=payload, headers=headers, timeout=25)
-        if res.status_code == 200 and len(res.content) > 0:
-            with open(output_path, "wb") as f:
-                f.write(res.content)
-            return True
-        print(f"[Fish Audio Error] HTTP {res.status_code}: {res.text}")
-        return False
-    except Exception as e:
-        print(f"[Fish Audio Exception] {e}")
-        return False
+    from fish_audio_sdk import Session, TTSRequest  # imported lazily so the app still runs without this package installed if unused
+
+    lang = get_language(language_key)
+    session = Session(api_key)
+
+    request_kwargs = {"text": text}
+    if lang.get("fish_voice_id"):
+        request_kwargs["reference_id"] = lang["fish_voice_id"]
+
+    request = TTSRequest(**request_kwargs)
+
+    with open(out_path, "wb") as f:
+        for chunk in session.tts(request):
+            f.write(chunk)
 
 
-def _generate_edge_tts(text: str, target_language: str, output_path: str) -> bool:
-    """Free, human-sounding Microsoft Edge neural voice generation."""
-    clean_text = _strip_emotion_tags(text)
-    voice = EDGE_VOICES.get(target_language.lower(), EDGE_VOICES["default"])
+# ---------------- Edge-TTS (free fallback) ----------------
+
+def generate_speech_edge(text: str, language_key: str, out_path: str):
+    import edge_tts  # lazy import, same reasoning as above
+
+    lang = get_language(language_key)
+    voice = lang.get("edge_voice")
+    if not voice:
+        raise RuntimeError(f"No Edge voice configured for language: {language_key}")
+
+    clean_text = strip_emotion_tags(text)
 
     async def _run():
         communicate = edge_tts.Communicate(clean_text, voice)
-        await communicate.save(output_path)
+        await communicate.save(out_path)
 
-    try:
-        asyncio.run(_run())
-        return True
-    except Exception as e:
-        print(f"[Edge TTS Error] {e}")
-        return False
+    asyncio.run(_run())
 
 
-def _generate_gtts(text: str, target_language: str, output_path: str):
-    clean_text = _strip_emotion_tags(text)
-    lang_info = SUPPORTED_LANGUAGES.get(target_language.lower(), {"code": "en"})[span_3](start_span)[span_3](end_span)
-    tts = gTTS(text=clean_text, lang=lang_info["code"], slow=False)[span_4](start_span)[span_4](end_span)
-    tts.save(output_path)[span_5](start_span)[span_5](end_span)
+# ---------------- Sarvam AI ----------------
+
+def generate_speech_sarvam(text: str, language_key: str, out_path: str):
+    api_key = os.getenv("SARVAM_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "SARVAM_API_KEY is not set. Add it to your environment, or choose "
+            "a different voice engine."
+        )
+    lang = get_language(language_key)
+    clean_text = strip_emotion_tags(text)
+
+    headers = {"api-subscription-key": api_key, "Content-Type": "application/json"}
+    payload = {
+        "inputs": [clean_text],
+        "target_language_code": lang["sarvam_code"],
+        "model": "bulbul:v3",
+        "speaker": "meera",
+    }
+    resp = requests.post(SARVAM_TTS_URL, headers=headers, json=payload, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+
+    audio_b64 = data["audios"][0]
+    with open(out_path, "wb") as f:
+        f.write(base64.b64decode(audio_b64))
 
 
-def generate_speech(text: str, target_language: str, output_path: str, engine: str = "fish"):
-    """
-    Speech generation routing:
-    1. engine='fish': attempts Fish Audio, falls back to Edge-TTS, then gTTS.
-    2. engine='edge': calls Edge-TTS directly.
-    3. engine='gtts': calls gTTS directly.
-    """
-    selected_engine = (engine or "fish").lower().strip()
-    fish_api_key = os.getenv("FISH_AUDIO_API_KEY")
+# ---------------- gTTS (free, most basic) ----------------
 
-    if selected_engine == "fish" and fish_api_key:
-        if _generate_fish_audio(text, target_language, output_path, fish_api_key):
+def generate_speech_gtts(text: str, language_key: str, out_path: str):
+    from gtts import gTTS  # lazy import
+
+    lang = get_language(language_key)
+    clean_text = strip_emotion_tags(text)
+    tts = gTTS(text=clean_text, lang=lang["gtts_code"])
+    tts.save(out_path)
+
+
+# ---------------- Dispatcher ----------------
+
+def generate_speech(text: str, language_key: str, out_path: str, engine: str = "fish"):
+    if not text or not text.strip():
+        return  # nothing to synthesize for an empty segment
+
+    if engine == "fish":
+        try:
+            generate_speech_fish(text, language_key, out_path)
+            return
+        except Exception as fish_error:  # noqa: BLE001 — deliberate broad catch for automatic fallback
+            print(f"[tts_service] Fish Audio failed ({fish_error}); falling back to Edge-TTS.")
+            generate_speech_edge(text, language_key, out_path)
             return
 
-    if selected_engine in ("fish", "edge"):
-        if _generate_edge_tts(text, target_language, output_path):
-            return
-
-    # Final fallback
-    _generate_gtts(text, target_language, output_path)
-    
+    if engine == "edge":
+        generate_speech_edge(text, language_key, out_path)
+    elif engine == "sarvam":
+        generate_speech_sarvam(text, language_key, out_path)
+    elif engine == "gtts":
+        generate_speech_gtts(text, language_key, out_path)
+    else:
+        raise ValueError(f"Unknown voice_engine: {engine}")

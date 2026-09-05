@@ -1,7 +1,6 @@
 """
-Uses Gemini 2.5 Flash to transcribe the extracted audio and translate it,
-segment by segment, into the target language. Forces strict JSON output
-compatible with the Echofy pipeline and modern Google GenAI SDK.
+Translates and adapts audio transcripts using Gemini 2.5 Flash.
+Outputs conversational dubbing dialogue complete with Fish Audio emotion direction tags.
 """
 import json
 import os
@@ -12,21 +11,25 @@ from google.genai import types
 MODEL_NAME = "gemini-2.5-flash"
 
 SYSTEM_INSTRUCTION = (
-    "You are a professional dubbing script generator. You transcribe spoken "
-    "audio, translate it, and return ONLY valid JSON matching the schema you "
-    "are given. No markdown, no code fences, no explanation, no preamble — "
-    "JSON only."
+    "You are an elite video dubbing script adapter and vocal director. "
+    "Your objective is to translate and adapt spoken dialogue so it sounds 100% natural, "
+    "colloquial, and emotionally alive when spoken by a voice actor. "
+    "Never produce stiff, literal, or academic translations. "
+    "You must insert expressive emotion/direction tags at the beginning of phrases "
+    "such as [excited], [serious], [laugh], [whispering], [curious], or [casual] "
+    "matching the tone of the speaker in that segment. "
+    "Output strictly valid JSON with no markdown formatting."
 )
 
-PROMPT_TEMPLATE = """Transcribe this audio and translate the dialogue into {target_language}.
+PROMPT_TEMPLATE = """Transcribe and adapt this audio into punchy, conversational {target_language}.
 
 Rules:
-- Preserve natural sentence/segment breaks matching short spoken phrases (roughly 2-8 seconds each), so timing stays close to the original speech rhythm.
-- start and end are in seconds, as floats, matching where each segment occurs in the audio.
-- Keep the translated text close in length/duration to the original phrase where possible.
-- If the audio has multiple speakers, label them speaker_1, speaker_2, etc. If unsure, use speaker_1 for everything.
+1. Adapt the phrasing to match conversational idioms in {target_language}.
+2. Ensure the duration of translated phrases matches the original segment window (start to end).
+3. Prefix translated segments with an appropriate inline direction tag like [excited], [confident], [calm], [curious], [laugh] to capture the speaker's emotional state.
+4. Keep timestamps as floats in seconds.
 
-Return JSON in exactly this shape:
+Output must match this exact JSON schema:
 {{
   "source_language": "string",
   "segments": [
@@ -35,7 +38,7 @@ Return JSON in exactly this shape:
       "end": 3.2,
       "speaker_id": "speaker_1",
       "original_text": "string",
-      "translated_text": "string"
+      "translated_text": "[excited] Hey, welcome back everyone!"
     }}
   ]
 }}
@@ -43,7 +46,6 @@ Return JSON in exactly this shape:
 
 
 def _extract_json(raw_text: str) -> dict:
-    """Strip markdown code blocks defensively if present."""
     cleaned = re.sub(r"^```(json)?|```$", "", raw_text.strip(), flags=re.MULTILINE).strip()
     return json.loads(cleaned)
 
@@ -53,10 +55,7 @@ def transcribe_and_translate(audio_path: str, target_language: str) -> dict:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY environment variable is missing.")
 
-    # Initialize client (works natively with your AQ. AI Studio key)
     client = genai.Client(api_key=api_key)
-
-    print(f"[Gemini] Uploading audio: {audio_path}")
     uploaded = client.files.upload(file=audio_path)
 
     prompt = PROMPT_TEMPLATE.format(target_language=target_language)
@@ -72,14 +71,12 @@ def transcribe_and_translate(audio_path: str, target_language: str) -> dict:
         )
 
         data = _extract_json(response.text)
-
         if "segments" not in data or not isinstance(data["segments"], list):
-            raise RuntimeError("Gemini response did not include a valid 'segments' list.")
+            raise RuntimeError("Gemini response did not contain a valid 'segments' list.")
 
         return data
 
     finally:
-        # Clean up temporary uploaded file from Google servers
         try:
             client.files.delete(name=uploaded.name)
         except Exception:

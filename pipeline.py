@@ -1,4 +1,4 @@
-# -> repo root: pipeline.py
+# -> pipeline.py
 import os
 import shutil
 import traceback
@@ -38,7 +38,7 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
             job_id, detected_source_language=result.get("detected_source_language")
         )
 
-        # ---- generate dubbed speech per segment (Sarvam or gTTS) ----
+        # ---- generate dubbed speech per segment ----
         supabase_service.update_dubbing_job(job_id, stage="Generating dubbed speech", progress=45)
         segment_files = []       # for local ffmpeg mixing
         segment_rows = []        # for the dubbing_segments table
@@ -51,7 +51,6 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
             tts_service.generate_speech(text, target_language, seg_audio_path, engine=voice_engine)
             segment_files.append({"start": float(seg.get("start", 0)), "path": seg_audio_path})
 
-            # upload this segment's clip so it's queryable/replayable later (e.g. for RAG)
             seg_bucket_path = f"jobs/{job_id}/segments/{i}_{uuid.uuid4().hex[:8]}.mp3"
             supabase_service.upload_file(
                 supabase_service.DUBBING_OUTPUTS_BUCKET, seg_bucket_path, seg_audio_path, "audio/mpeg"
@@ -63,7 +62,7 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
                 "start_seconds": seg.get("start", 0),
                 "end_seconds": seg.get("end", 0),
                 "original_text": seg.get("original_text", ""),
-                "translated_text": text,
+                "translated_text": tts_service.strip_emotion_tags(text),
                 "tts_audio_url": seg_bucket_path,
             })
 
@@ -101,4 +100,3 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
 
     finally:
         shutil.rmtree(job_tmp, ignore_errors=True)
-        

@@ -1,11 +1,12 @@
-# -> backend/services/supabase_service.py
+# -> supabase_service.py
 """
-All Supabase reads/writes go through this module — storage (buckets) and
-the two tables the dubbing pipeline touches: dubbing_jobs, dubbing_segments.
+All Supabase reads/writes go through this module.
 
-Uses the service role key, so it bypasses RLS entirely. That's fine for now
-since there's no auth layer yet — once you add accounts, switch to scoping
-these calls per-user and add RLS policies as described in the schema file.
+Key fix vs earlier version: supabase-py v2's storage upload requires
+file_options values to be STRINGS — passing upsert=True (a Python bool)
+or omitting content-type correctly is a common source of silent 500s.
+Every public function here raises a clear, descriptive RuntimeError instead
+of letting the raw Supabase/httpx exception bubble up as an opaque 500.
 """
 import os
 
@@ -24,7 +25,7 @@ def get_client() -> Client:
         key = os.getenv("SUPABASE_SERVICE_KEY")
         if not url or not key:
             raise RuntimeError(
-                "SUPABASE_URL / SUPABASE_SERVICE_KEY are not set. Add them to backend/.env."
+                "SUPABASE_URL / SUPABASE_SERVICE_KEY are not set in the environment."
             )
         _client = create_client(url, key)
     return _client
@@ -34,24 +35,49 @@ def get_client() -> Client:
 
 def upload_file(bucket: str, path: str, local_file_path: str, content_type: str = "application/octet-stream"):
     client = get_client()
-    with open(local_file_path, "rb") as f:
-        data = f.read()
-    client.storage.from_(bucket).upload(
-        path, data, {"content-type": content_type, "upsert": "true"}
-    )
+    try:
+        with open(local_file_path, "rb") as f:
+            data = f.read()
+    except OSError as exc:
+        raise RuntimeError(f"Could not read local file '{local_file_path}' to upload: {exc}") from exc
+
+    # supabase-py v2 requires ALL file_options values to be strings —
+    # a bool here (upsert=True) is a common silent failure point.
+    file_options = {
+        "content-type": content_type,
+        "upsert": "true",
+    }
+
+    try:
+        client.storage.from_(bucket).upload(path, data, file_options)
+    except Exception as exc:  # noqa: BLE001 — surface storage errors clearly
+        raise RuntimeError(
+            f"Supabase Storage upload failed for bucket='{bucket}' path='{path}': {exc}"
+        ) from exc
 
 
 def download_to_file(bucket: str, path: str, local_file_path: str):
     client = get_client()
-    data = client.storage.from_(bucket).download(path)
+    try:
+        data = client.storage.from_(bucket).download(path)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"Supabase Storage download failed for bucket='{bucket}' path='{path}': {exc}"
+        ) from exc
+
     with open(local_file_path, "wb") as f:
         f.write(data)
 
 
-def create_signed_url(bucket: str, path: str, expires_in_seconds: int = 3600) -> str:
+def create_signed_url(bucket: str, path: str, expires_in_seconds: int = 3600) -> str | None:
     client = get_client()
-    result = client.storage.from_(bucket).create_signed_url(path, expires_in_seconds)
-    # supabase-py returns {'signedURL': '...'} or {'signedUrl': '...'} depending on version
+    try:
+        result = client.storage.from_(bucket).create_signed_url(path, expires_in_seconds)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"Could not create signed URL for bucket='{bucket}' path='{path}': {exc}"
+        ) from exc
+    # supabase-py has returned both 'signedURL' and 'signedUrl' across versions
     return result.get("signedURL") or result.get("signedUrl")
 
 
@@ -68,18 +94,35 @@ def create_dubbing_job(video_name: str, target_language: str, voice_engine: str,
         "stage": "Queued",
         "progress": 0,
     }
-    result = client.table("dubbing_jobs").insert(row).execute()
+    try:
+        result = client.table("dubbing_jobs").insert(row).execute()
+    except Exception as exc:  # noqa: BLE001
+        # Most common cause: voice_engine value not allowed by the table's
+        # CHECK constraint — see the migration note in requirements.txt / README.
+        raise RuntimeError(f"Failed to create dubbing_jobs row: {exc}") from exc
+
+    if not result.data:
+        raise RuntimeError("dubbing_jobs insert returned no data — check table permissions/schema.")
+
     return result.data[0]["id"]
 
 
 def update_dubbing_job(job_id: str, **fields):
+    if not fields:
+        return
     client = get_client()
-    client.table("dubbing_jobs").update(fields).eq("id", job_id).execute()
+    try:
+        client.table("dubbing_jobs").update(fields).eq("id", job_id).execute()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[supabase_service] Failed to update dubbing_jobs id={job_id} with {fields}: {exc}")
 
 
 def get_dubbing_job(job_id: str) -> dict | None:
     client = get_client()
-    result = client.table("dubbing_jobs").select("*").eq("id", job_id).execute()
+    try:
+        result = client.table("dubbing_jobs").select("*").eq("id", job_id).execute()
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Failed to fetch dubbing_jobs id={job_id}: {exc}") from exc
     return result.data[0] if result.data else None
 
 
@@ -94,4 +137,9 @@ def insert_segments(job_id: str, segments: list[dict]):
         return
     client = get_client()
     rows = [{**seg, "job_id": job_id} for seg in segments]
-    client.table("dubbing_segments").insert(rows).execute()
+    try:
+        client.table("dubbing_segments").insert(rows).execute()
+    except Exception as exc:  # noqa: BLE001
+        # Don't let a segments-table hiccup fail the whole job — the video
+        # itself can still complete even if this history table write fails.
+        print(f"[supabase_service] Failed to insert dubbing_segments for job {job_id}: {exc}")

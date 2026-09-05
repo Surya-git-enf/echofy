@@ -12,18 +12,18 @@ from fastapi.staticfiles import StaticFiles
 
 import pipeline
 import supabase_service
-from languages import is_supported, public_language_list
+from languages import SUPPORTED_LANGUAGES
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCAL_TMP_DIR = os.path.join(BASE_DIR, "storage", "tmp")
 os.makedirs(LOCAL_TMP_DIR, exist_ok=True)
 
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
-MAX_UPLOAD_BYTES = 300 * 1024 * 1024  # 300MB — generous free-tier-friendly ceiling
+MAX_UPLOAD_BYTES = 300 * 1024 * 1024  # 300MB
 
-app = FastAPI(title="Echofy Dubbing MVP (Supabase-backed)")
+app = FastAPI(title="Echofy Dubbing MVP")
 
-origins = os.getenv("ALLOWED_ORIGINS", "*")
+origins = os.getenv("ALLOWED_ORIGINS", "*")[span_2](start_span)[span_2](end_span)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if origins == "*" else origins.split(","),
@@ -33,100 +33,112 @@ app.add_middleware(
 
 
 def _job_public_view(job: dict) -> dict:
-    """
-    Only return what the frontend actually needs — never raw bucket paths,
-    internal ids beyond job_id, or anything else sitting on the row.
-    A signed, time-limited download URL is generated on demand instead of
-    exposing the bucket path directly.
-    """
-    view = {
+    """Only return safe public properties and signed download URLs."""
+    download_url = None
+    is_done = job.get("status") == "completed[span_3](start_span)"[span_3](end_span)
+
+    if is_done and job.get("output_video_url"):
+        download_url = supabase_service.get_signed_url_from_path(
+            bucket="dubbing_outputs",
+            storage_path=job["output_video_url"],
+            expires_in=3600,
+        )[span_4](start_span)[span_4](end_span)
+
+    return {
         "job_id": job["id"],
         "status": job.get("status"),
         "stage": job.get("stage"),
         "progress": job.get("progress", 0),
-        "detected_source_language": job.get("detected_source_language"),
-        "error": job.get("error") if job.get("status") == "failed" else None,
-        "download_ready": job.get("status") == "completed",
-        "download_url": None,
-    }
-    if view["download_ready"] and job.get("output_url"):
-        view["download_url"] = supabase_service.create_signed_url(
-            supabase_service.DUBBING_OUTPUTS_BUCKET, job["output_url"], expires_in_seconds=3600
-        )
-    return view
+        "detected_source_language": job.get("from_language") or job.get("detected_source_language"),
+        "error": job.get("error_message") or job.get("error"),
+        "download_ready": is_done,
+        "download_url": download_url,
+    }[span_5](start_span)[span_5](end_span)
 
 
 @app.get("/api/languages")
 def get_languages():
-    return {"languages": public_language_list()}
+    return {"languages": SUPPORTED_LANGUAGES}[span_6](start_span)[span_6](end_span)
 
 
 @app.post("/api/dub")
 async def create_dub_job(
     background_tasks: BackgroundTasks,
     video: UploadFile = File(...),
-    target_language: str = Form(...),
-    voice_engine: str = Form("gtts"),
+    target_language: str = Form("telugu"),
+    voice_engine: str = Form("fish"),
 ):
-    ext = os.path.splitext(video.filename or "")[1].lower()
+    if not video.filename:
+        raise HTTPException(status_code=400, detail="No video file provided.")[span_7](start_span)[span_7](end_span)
+
+    ext = os.path.splitext(video.filename)[1].lower()
     if ext not in ALLOWED_VIDEO_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or 'unknown'}")
 
-    if not is_supported(target_language):
-        raise HTTPException(status_code=400, detail=f"Unsupported target language: {target_language}")
+    target_lang = target_language.lower().strip()[span_8](start_span)[span_8](end_span)
+    if target_lang not in SUPPORTED_LANGUAGES:
+        raise HTTPException(status_code=400, detail=f"Unsupported target language: {target_lang}")
 
-    if voice_engine not in ("gtts", "sarvam","fish","edge"):
-        raise HTTPException(status_code=400, detail="voice_engine must be 'gtts' or 'sarvam'")
-
-    # Stream the upload to a short-lived local temp file just long enough to
-    # push it into Supabase — nothing is meant to persist on local disk,
-    # since that disk is wiped on every restart/redeploy on Render's free tier.
-    temp_id = uuid.uuid4().hex
-    local_temp_path = os.path.join(LOCAL_TMP_DIR, f"{temp_id}{ext}")
-
-    size = 0
-    with open(local_temp_path, "wb") as f:
-        while chunk := await video.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_UPLOAD_BYTES:
-                f.close()
-                os.remove(local_temp_path)
-                raise HTTPException(status_code=400, detail="File too large for this MVP (300MB limit)")
-            f.write(chunk)
-
-    video_bucket_path = f"uploads/{temp_id}{ext}"
-    try:
-        supabase_service.upload_file(
-            supabase_service.VIDEO_UPLOADS_BUCKET, video_bucket_path, local_temp_path, video.content_type or "video/mp4"
+    allowed_engines = {"gtts", "sarvam", "fish", "edge"}
+    selected_engine = voice_engine.lower().strip()
+    if selected_engine not in allowed_engines:
+        raise HTTPException(
+            status_code=400,
+            detail=f"voice_engine must be one of: {list(allowed_engines)}"
         )
-    finally:
-        os.remove(local_temp_path)
 
-    job_id = supabase_service.create_dubbing_job(
-        video_name=video.filename or "video",
-        target_language=target_language,
-        voice_engine=voice_engine,
-        video_path=video_bucket_path,
-    )
+    # Read video into bytes and check upload size limit
+    video_bytes = await video.read()[span_9](start_span)[span_9](end_span)
+    if len(video_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="File too large for this MVP (300MB limit)")
 
+    job_id = str(uuid.uuid4())[span_10](start_span)[span_10](end_span)
+    video_bucket_path = f"inputs/{job_id}_{video.filename}[span_11](start_span)"[span_11](end_span)
+
+    # Upload raw bytes directly to Supabase Storage
+    try:
+        source_url = supabase_service.upload_file(
+            bucket="video_uploads",
+            destination_path=video_bucket_path,
+            file_bytes=video_bytes,
+            content_type=video.content_type or "video/mp4",
+        )[span_12](start_span)[span_12](end_span)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Supabase storage upload failed: {str(e)}")[span_13](start_span)[span_13](end_span)
+
+    # Record job in Supabase database
+    try:
+        supabase_service.create_job(
+            job_id=job_id,
+            video_name=video.filename,
+            to_language=target_lang,
+            source_url=source_url,
+            voice_engine=selected_engine,
+        )[span_14](start_span)[span_14](end_span)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create job record: {str(e)}")
+
+    # Dispatch async pipeline worker
     background_tasks.add_task(
-        pipeline.run_pipeline, job_id, video_bucket_path, target_language, voice_engine,
-    )
+        pipeline.run_dubbing_pipeline,
+        job_id=job_id,
+        video_bytes=video_bytes,
+        filename=video.filename,
+        target_language=target_lang,
+        voice_engine=selected_engine,
+    )[span_15](start_span)[span_15](end_span)
 
-    return {"job_id": job_id}
+    return {"job_id": job_id}[span_16](start_span)[span_16](end_span)
 
 
 @app.get("/api/dub/{job_id}")
 def get_dub_status(job_id: str):
-    job = supabase_service.get_dubbing_job(job_id)
+    job = supabase_service.get_job(job_id)[span_17](start_span)[span_17](end_span)
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail="Job not found")[span_18](start_span)[span_18](end_span)
     return _job_public_view(job)
 
 
-# Serve the static frontend from the same process, from a ./frontend folder
-# if you keep one alongside these files. Safe to leave in even if that
-# folder doesn't exist yet — it just won't mount.
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 if os.path.isdir(FRONTEND_DIR):
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

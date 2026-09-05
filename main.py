@@ -75,7 +75,7 @@ async def create_dub_job(
     if not is_supported(target_language):
         raise HTTPException(status_code=400, detail=f"Unsupported target language: {target_language}")
 
-    if voice_engine not in ("gtts", "sarvam"):
+    if voice_engine not in ("gtts", "sarvam","fish","edge"):
         raise HTTPException(status_code=400, detail="voice_engine must be 'gtts' or 'sarvam'")
 
     # Stream the upload to a short-lived local temp file just long enough to

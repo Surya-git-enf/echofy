@@ -1,8 +1,31 @@
-fastapi>=0.100.0
-uvicorn[standard]>=0.22.0
-python-multipart>=0.0.6
-google-genai>=1.0.0
-requests>=2.31.0
-edge-tts>=6.1.9
-supabase>=2.0.0
-python-dotenv>=1.0.0
+# -> requirements.txt
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+requests==2.32.3
+python-dotenv==1.0.1
+supabase>=2.6.0
+
+# Gemini — modern SDK, replaces deprecated google-generativeai
+google-genai>=0.5.0
+
+# TTS engines
+fish-audio-sdk>=2024.12.5
+edge-tts>=6.1.19
+gTTS==2.5.3
+
+# ============================================================
+# REQUIRED DATABASE MIGRATION — run this in Supabase SQL editor
+# before deploying this version. The original schema's CHECK
+# constraint on dubbing_jobs.voice_engine only allowed
+# ('gtts', 'sarvam') — inserting 'fish' or 'edge' will fail
+# with a constraint violation (a likely cause of your 500s)
+# until you run:
+#
+#   alter table public.dubbing_jobs
+#     drop constraint if exists dubbing_jobs_voice_engine_check;
+#
+#   alter table public.dubbing_jobs
+#     add constraint dubbing_jobs_voice_engine_check
+#     check (voice_engine in ('gtts', 'sarvam', 'fish', 'edge'));
+# ============================================================

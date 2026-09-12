@@ -81,8 +81,12 @@ def generate_speech_fish(text: str, language_key: str, out_path: str, character_
 
     reference_id = ARCHETYPE_VOICE_MAP.get(character_profile, ARCHETYPE_VOICE_MAP["default"])
 
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {"text": text, "format": "mp3", "model": FISH_MODEL}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "model": FISH_MODEL,  # Fish Audio requires the model as a HEADER, not a body field
+    }
+    payload = {"text": text, "format": "mp3"}
     if reference_id:
         payload["reference_id"] = reference_id
 
@@ -230,4 +234,3 @@ def generate_speech(text: str, language_key: str, out_path: str, engine: str = "
         generate_speech_gtts(text, language_key, out_path)
     else:
         raise ValueError(f"Unknown voice_engine: {engine}")
-        

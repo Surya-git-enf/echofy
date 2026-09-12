@@ -68,7 +68,8 @@ async def create_dub_job(
     background_tasks: BackgroundTasks,
     video: UploadFile = File(...),
     target_language: str = Form(...),
-    voice_engine: str = Form("echofy"),
+    voice_engine: str = Form("fish"),
+    preserve_background_music: bool = Form(False),
 ):
     ext = os.path.splitext(video.filename or "")[1].lower()
     if ext not in ALLOWED_VIDEO_EXTENSIONS:
@@ -134,7 +135,7 @@ async def create_dub_job(
         raise HTTPException(status_code=500, detail=f"Failed to create dubbing job record: {exc}") from exc
 
     background_tasks.add_task(
-        pipeline.run_pipeline, job_id, video_bucket_path, target_language, voice_engine,
+        pipeline.run_pipeline, job_id, video_bucket_path, target_language, voice_engine, preserve_background_music,
     )
 
     return {"job_id": job_id}

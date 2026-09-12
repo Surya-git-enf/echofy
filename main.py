@@ -23,8 +23,8 @@ LOCAL_TMP_DIR = os.path.join(BASE_DIR, "storage", "tmp")
 os.makedirs(LOCAL_TMP_DIR, exist_ok=True)
 
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
-ALLOWED_VOICE_ENGINES = {"fish", "edge", "sarvam", "gtts"}
-MAX_UPLOAD_BYTES = 300 * 1024 * 1024
+ALLOWED_VOICE_ENGINES = {"fish", "echofy", "edge", "sarvam", "gtts"}
+MAX_UPLOAD_BYTES = 800 * 1024 * 1024  # ~800MB — enough headroom for a 20-min compressed video
 
 app = FastAPI(title="Echofy Dubbing MVP (Supabase-backed)")
 
@@ -68,7 +68,7 @@ async def create_dub_job(
     background_tasks: BackgroundTasks,
     video: UploadFile = File(...),
     target_language: str = Form(...),
-    voice_engine: str = Form("fish"),
+    voice_engine: str = Form("echofy"),
 ):
     ext = os.path.splitext(video.filename or "")[1].lower()
     if ext not in ALLOWED_VIDEO_EXTENSIONS:
@@ -84,10 +84,10 @@ async def create_dub_job(
         )
 
     if voice_engine == "fish" and not os.getenv("FISH_AUDIO_API_KEY"):
-        raise HTTPException(
-            status_code=400,
-            detail="voice_engine='fish' was requested but FISH_AUDIO_API_KEY is not configured on the server.",
-        )
+        raise HTTPException(status_code=400, detail="voice_engine='fish' requires FISH_AUDIO_API_KEY on the server.")
+
+    if voice_engine == "echofy" and not os.getenv("ECHOFY_VOICE_SERVICE_URL"):
+        raise HTTPException(status_code=400, detail="voice_engine='echofy' requires ECHOFY_VOICE_SERVICE_URL on the server.")
 
     temp_id = uuid.uuid4().hex
     local_temp_path = os.path.join(LOCAL_TMP_DIR, f"{temp_id}{ext}")

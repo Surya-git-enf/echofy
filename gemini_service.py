@@ -24,6 +24,16 @@ PROMPT_TEMPLATE = """Transcribe this audio and adapt the dialogue into {target_l
 professional dubbing director would — natural, colloquial, punchy. This is NOT a
 literal/dictionary translation.
 
+CRITICAL — SCENE-LEVEL UNDERSTANDING, NOT LINE-BY-LINE SUBSTITUTION:
+Before writing any single segment, listen to and understand the WHOLE scene — the
+relationship between speakers, the mood, what's actually happening dramatically.
+Then write each line to fit that scene naturally, the way a native speaker would
+actually talk in that moment — NOT a word-for-word swap of the original sentence
+structure. A literal swap like turning "not interesting anymore" into a stiff
+phrase such as "inka interesting gaa emundhada" (a rigid, textbook-style rendering)
+is exactly what to avoid. Instead, write what a real person would naturally say in
+that emotional beat, even if the sentence structure looks nothing like the original.
+
 Rules:
 - Preserve natural sentence/segment breaks matching short spoken phrases (roughly 2-8 seconds each).
 - start/end are in seconds, as floats, matching where each segment occurs in the audio.
@@ -36,16 +46,14 @@ Rules:
   become something like "Prabhuvu thage drink idhe!" — NOT a stiff formal translation.
 
 - EXPRESSIVE DELIVERY (bracket tags + phonetic sound effects, combined): the TTS model
-  understands inline bracket tags like [laugh], [whispers], [sigh], [excited],
+  understands inline bracket tags like [laughing], [whispers], [sigh], [excited],
   [angry], [crying] placed at the point in the sentence where that delivery happens.
   It ALSO renders phonetically-spelled sound effects naturally. Use BOTH together
   for maximum effect — the tag sets the delivery style, the phonetic spelling gives
   it the actual sound. Only add these where the source audio genuinely calls for it;
   most neutral dialogue should have neither.
-  Example: "[laugh] Mwahahaha! Hehehe... You really thought you had a chance?!"
+  Example: "[laughing] Mwahahaha! Hehehe... You really thought you had a chance?!"
   Example: "[whispers] I'll find you... no matter where you hide."
-  Do NOT invent tags outside natural delivery words like these — keep them simple
-  and common (laugh, whisper, sigh, excited, angry, crying, gasp).
 
 - CHARACTER ARCHETYPE (who is speaking): classify the speaker's general vocal profile —
   exactly one value from: {archetypes}. Use "default" if nothing distinctive stands out.
@@ -66,7 +74,7 @@ Return JSON in exactly this shape:
       "character_profile": "one of: {archetypes}",
       "emotion": "one of: {emotions}",
       "original_text": "string",
-      "translated_text": "string — natural, colloquial, may include [bracket tags] combined with phonetically-spelled sound effects where the moment calls for it"
+      "translated_text": "string — natural, scene-appropriate, colloquial, may include [bracket tags] combined with phonetically-spelled sound effects where the moment calls for it"
     }}
   ]
 }}

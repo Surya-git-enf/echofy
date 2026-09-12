@@ -100,6 +100,56 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
         _run(["ffmpeg", "-y", "-i", running_track, output_path])
 
 
+def separate_vocals(audio_path: str, work_dir: str) -> tuple:
+    """
+    Splits audio into (vocals_path, background_path) using audio-separator
+    (UVR's MDX-Net models), which is meaningfully faster on CPU than full
+    Demucs — though speed still scales with audio duration, not a flat
+    constant regardless of length.
+    """
+    from audio_separator.separator import Separator
+
+    models_dir = os.path.join(work_dir, "models_cache")
+    separator = Separator(output_dir=work_dir, model_file_dir=models_dir)
+    separator.load_model(model_filename="UVR-MDX-NET-Inst_HQ_3.onnx")
+    output_files = separator.separate(audio_path)
+
+    vocals_path, background_path = None, None
+    for f in output_files:
+        full_path = f if os.path.isabs(f) else os.path.join(work_dir, f)
+        if "(Vocals)" in f:
+            vocals_path = full_path
+        elif "(Instrumental)" in f:
+            background_path = full_path
+
+    if not vocals_path or not background_path:
+        raise FFmpegError(f"audio-separator did not produce expected vocal/instrumental stems: {output_files}")
+
+    return vocals_path, background_path
+
+
+def mix_with_background_music(dubbed_track_path: str, background_music_path: str, output_path: str,
+                               duck_threshold: float = 0.05, duck_ratio: float = 8.0):
+    """
+    Sidechain auto-ducking: the background music automatically gets quieter
+    whenever the dubbed voice is speaking, and comes back up during pauses —
+    instead of a flat constant volume reduction the whole way through.
+    """
+    filter_complex = (
+        f"[1:a][0:a]sidechaincompress=threshold={duck_threshold}:ratio={duck_ratio}:attack=5:release=250:makeup=1[ducked_music];"
+        f"[0:a][ducked_music]amix=inputs=2:duration=longest:normalize=0[out]"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", dubbed_track_path,
+        "-i", background_music_path,
+        "-filter_complex", filter_complex,
+        "-map", "[out]",
+        output_path,
+    ]
+    _run(cmd)
+
+
 def merge_audio_into_video(video_path: str, dubbed_audio_path: str, output_path: str):
     cmd = [
         "ffmpeg", "-y",

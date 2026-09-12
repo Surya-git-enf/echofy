@@ -9,12 +9,15 @@ from google.genai import types
 MODEL_NAME = "gemini-2.5-flash"
 
 ARCHETYPES = ["anime_villain", "monster_deep", "young_boy", "cool_hero", "mature_female", "default"]
+EMOTIONS = ["neutral", "excited", "sad", "angry", "calm", "whisper", "serious"]
 
 SYSTEM_INSTRUCTION = (
     "You are a professional film dialogue adapter and voice director — NOT a "
-    "literal translator. You are dubbing for movies/anime. You return ONLY "
-    "valid JSON matching the schema you are given. No markdown, no code "
-    "fences, no explanation, no preamble — JSON only."
+    "literal translator. You are dubbing for movies/anime, writing scripts for "
+    "Fish Audio's S2.1 Pro TTS model, which understands BOTH inline bracket "
+    "tags (e.g. [laugh], [whispers sweetly], [sigh]) AND phonetically spelled "
+    "sound effects. You return ONLY valid JSON matching the schema you are "
+    "given. No markdown, no code fences, no explanation, no preamble — JSON only."
 )
 
 PROMPT_TEMPLATE = """Transcribe this audio and adapt the dialogue into {target_language} the way a
@@ -30,17 +33,27 @@ Rules:
 - COLLOQUIAL LOANWORDS: Do not translate everyday words into archaic/formal language.
   Preserve natural English loanwords as commonly spoken (e.g. drink, car, building,
   bike, police, boss, party). Example: "This is a drink which the lord drinks" should
-  become something like "Prabhuvu thage drink idhe!" — NOT a stiff formal translation
-  like "Idhi prabhuvu paaneeyam".
+  become something like "Prabhuvu thage drink idhe!" — NOT a stiff formal translation.
 
-- PHONETIC LAUGHTER & ACTING CADENCE: Never insert bracketed meta-tags like [evil laugh]
-  or [laughing]. Instead spell vocal actions out phonetically with punctuation so a TTS
-  model actually pronounces them naturally. Example: "Mwahahaha! Hehehe... You really
-  thought you had a chance?!"
+- EXPRESSIVE DELIVERY (bracket tags + phonetic sound effects, combined): the TTS model
+  understands inline bracket tags like [laugh], [whispers], [sigh], [excited],
+  [angry], [crying] placed at the point in the sentence where that delivery happens.
+  It ALSO renders phonetically-spelled sound effects naturally. Use BOTH together
+  for maximum effect — the tag sets the delivery style, the phonetic spelling gives
+  it the actual sound. Only add these where the source audio genuinely calls for it;
+  most neutral dialogue should have neither.
+  Example: "[laugh] Mwahahaha! Hehehe... You really thought you had a chance?!"
+  Example: "[whispers] I'll find you... no matter where you hide."
+  Do NOT invent tags outside natural delivery words like these — keep them simple
+  and common (laugh, whisper, sigh, excited, angry, crying, gasp).
 
-- CHARACTER ARCHETYPE: For each segment, classify the speaker's vocal profile by
-  listening to tone, pitch, and delivery in the audio. Choose exactly one value from
-  this list: {archetypes}. Use "default" if nothing distinctive stands out.
+- CHARACTER ARCHETYPE (who is speaking): classify the speaker's general vocal profile —
+  exactly one value from: {archetypes}. Use "default" if nothing distinctive stands out.
+  This should stay CONSISTENT for the same speaker across segments.
+
+- EMOTION (how this specific line is delivered right now, for engines that pick
+  reference clips by emotion rather than reading tags): exactly one value from:
+  {emotions}.
 
 Return JSON in exactly this shape:
 {{
@@ -51,8 +64,9 @@ Return JSON in exactly this shape:
       "end": 3.2,
       "speaker": "speaker_1",
       "character_profile": "one of: {archetypes}",
+      "emotion": "one of: {emotions}",
       "original_text": "string",
-      "translated_text": "string — natural, colloquial, phonetically-spelled acting cues, no bracket tags"
+      "translated_text": "string — natural, colloquial, may include [bracket tags] combined with phonetically-spelled sound effects where the moment calls for it"
     }}
   ]
 }}
@@ -67,9 +81,7 @@ def _extract_json(raw_text: str) -> dict:
 def transcribe_and_translate(audio_path: str, target_language_label: str) -> dict:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY is not set. Add it to your environment before running a dubbing job."
-        )
+        raise RuntimeError("GEMINI_API_KEY is not set.")
 
     client = genai.Client(api_key=api_key)
     uploaded_file = client.files.upload(file=audio_path)
@@ -77,6 +89,7 @@ def transcribe_and_translate(audio_path: str, target_language_label: str) -> dic
     prompt = PROMPT_TEMPLATE.format(
         target_language=target_language_label,
         archetypes=", ".join(ARCHETYPES),
+        emotions=", ".join(EMOTIONS),
     )
 
     response = client.models.generate_content(
@@ -89,18 +102,18 @@ def transcribe_and_translate(audio_path: str, target_language_label: str) -> dic
     )
 
     if not response or not response.text:
-        raise RuntimeError("Gemini returned an empty response for transcription/translation.")
+        raise RuntimeError("Gemini returned an empty response.")
 
     data = _extract_json(response.text)
 
     if "segments" not in data or not isinstance(data["segments"], list):
         raise RuntimeError("Gemini response did not include a valid 'segments' list.")
 
-    # normalize any unexpected archetype value down to "default" rather than
-    # letting a bad value silently break voice selection downstream
     for seg in data["segments"]:
         if seg.get("character_profile") not in ARCHETYPES:
             seg["character_profile"] = "default"
+        if seg.get("emotion") not in EMOTIONS:
+            seg["emotion"] = "neutral"
 
     return data
     

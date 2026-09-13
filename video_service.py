@@ -18,6 +18,23 @@ def _run(cmd: list):
     return result
 
 
+def validate_video(media_path: str):
+    """
+    Fast sanity check (ffprobe only, no decoding) run immediately after
+    download — fails fast with a clear message if the file is corrupted
+    or incomplete (most commonly: the upload got cut off partway through),
+    instead of surfacing a confusing raw ffmpeg error deep in the pipeline.
+    """
+    try:
+        get_duration_seconds(media_path)
+    except FFmpegError as exc:
+        raise FFmpegError(
+            "The uploaded video file appears corrupted or incomplete "
+            "(this usually means the upload was cut off partway through). "
+            f"Try re-uploading the file. Raw ffprobe error: {exc}"
+        ) from exc
+
+
 def get_duration_seconds(media_path: str) -> float:
     cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", media_path]
     result = _run(cmd)
@@ -27,7 +44,7 @@ def get_duration_seconds(media_path: str) -> float:
 
 def extract_audio(video_path: str, audio_out_path: str):
     cmd = [
-        "ffmpeg", "-y", "-i", video_path,
+        "ffmpeg", "-y", "-hide_banner", "-i", video_path,
         "-vn", "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le",
         audio_out_path,
     ]
@@ -60,7 +77,7 @@ def _mix_batch(segment_batch: list, total_duration_seconds: float, output_path: 
     filter_complex = ";".join(filter_parts) + f";{mix_inputs}amix=inputs={input_index}:duration=longest:normalize=0[out]"
 
     cmd = [
-        "ffmpeg", "-y", *inputs,
+        "ffmpeg", "-y", "-hide_banner", *inputs,
         "-filter_complex", filter_complex,
         "-map", "[out]",
         "-t", str(total_duration_seconds),
@@ -78,7 +95,7 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
     """
     if not segment_files:
         cmd = [
-            "ffmpeg", "-y", "-f", "lavfi",
+            "ffmpeg", "-y", "-hide_banner", "-f", "lavfi",
             "-i", "anullsrc=r=44100:cl=stereo",
             "-t", str(total_duration_seconds),
             output_path,
@@ -97,7 +114,7 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
             running_track = batch_output
 
         # copy the final running track to the requested output path
-        _run(["ffmpeg", "-y", "-i", running_track, output_path])
+        _run(["ffmpeg", "-y", "-hide_banner", "-i", running_track, output_path])
 
 
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:
@@ -140,7 +157,7 @@ def mix_with_background_music(dubbed_track_path: str, background_music_path: str
         f"[0:a][ducked_music]amix=inputs=2:duration=longest:normalize=0[out]"
     )
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-y", "-hide_banner",
         "-i", dubbed_track_path,
         "-i", background_music_path,
         "-filter_complex", filter_complex,
@@ -152,7 +169,7 @@ def mix_with_background_music(dubbed_track_path: str, background_music_path: str
 
 def merge_audio_into_video(video_path: str, dubbed_audio_path: str, output_path: str):
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-y", "-hide_banner",
         "-i", video_path,
         "-i", dubbed_audio_path,
         "-c:v", "copy",

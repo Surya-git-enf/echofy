@@ -13,23 +13,39 @@ from languages import get_language
 TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "storage", "tmp")
 
 
-def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voice_engine: str):
-    job_tmp = os.path.join(TMP_DIR, job_id)
-    os.makedirs(job_tmp, exist_ok=True)
-
+def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voice_engine: str, preserve_background_music: bool = False):
+    job_tmp = None
     try:
+        # Mark the job as actually started RIGHT AWAY — if anything below
+        # fails before the first real update, this line still ran, so the
+        # job never gets stuck silently at its initial "Queued" state.
+        supabase_service.update_dubbing_job(job_id, stage="Starting job", progress=1)
+
+        job_tmp = os.path.join(TMP_DIR, job_id)
+        os.makedirs(job_tmp, exist_ok=True)
+
         supabase_service.update_dubbing_job(job_id, stage="Downloading video", progress=5)
         local_video_path = os.path.join(job_tmp, "source" + os.path.splitext(video_bucket_path)[1])
         supabase_service.download_to_file(supabase_service.VIDEO_UPLOADS_BUCKET, video_bucket_path, local_video_path)
 
-        supabase_service.update_dubbing_job(job_id, stage="Extracting audio", progress=15)
+        supabase_service.update_dubbing_job(job_id, stage="Extracting audio", progress=12)
         audio_path = os.path.join(job_tmp, "source_audio.wav")
         video_service.extract_audio(local_video_path, audio_path)
         total_duration = video_service.get_duration_seconds(local_video_path)
 
-        supabase_service.update_dubbing_job(job_id, stage="Transcribing & adapting dialogue", progress=30)
+        background_music_path = None
+        transcribe_source_path = audio_path
+        if preserve_background_music:
+            # SLOW on CPU — roughly 5-10x real-time. Skipped by default for
+            # speed; the whole original audio track gets replaced (no music
+            # preserved) unless this flag is explicitly turned on.
+            supabase_service.update_dubbing_job(job_id, stage="Separating vocals from music", progress=22)
+            vocals_path, background_music_path = video_service.separate_vocals(audio_path, job_tmp)
+            transcribe_source_path = vocals_path
+
+        supabase_service.update_dubbing_job(job_id, stage="Transcribing & adapting dialogue", progress=35)
         lang_label = get_language(target_language)["label"]
-        result = gemini_service.transcribe_and_translate(audio_path, lang_label)
+        result = gemini_service.transcribe_and_translate(transcribe_source_path, lang_label)
         segments = result.get("segments", [])
         supabase_service.update_dubbing_job(job_id, from_language=result.get("detected_source_language"))
 
@@ -42,11 +58,12 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
                 continue
 
             character_profile = seg.get("character_profile", "default")
+            emotion = seg.get("emotion", "neutral")
 
             seg_audio_path = os.path.join(job_tmp, f"segment_{i}.mp3")
             tts_service.generate_speech(
                 text, target_language, seg_audio_path,
-                engine=voice_engine, character_profile=character_profile,
+                engine=voice_engine, character_profile=character_profile, emotion=emotion,
             )
             segment_files.append({"start": float(seg.get("start", 0)), "path": seg_audio_path})
 
@@ -59,6 +76,7 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
                 "segment_index": i,
                 "speaker": seg.get("speaker"),
                 "character_profile": character_profile,
+                "emotion": emotion,
                 "start_seconds": seg.get("start", 0),
                 "end_seconds": seg.get("end", 0),
                 "original_text": seg.get("original_text", ""),
@@ -75,9 +93,15 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
         dubbed_track_path = os.path.join(job_tmp, "dubbed_track.wav")
         video_service.build_dubbed_track(segment_files, total_duration, dubbed_track_path)
 
+        final_audio_path = dubbed_track_path
+        if preserve_background_music and background_music_path:
+            supabase_service.update_dubbing_job(job_id, stage="Remixing with original background music", progress=82)
+            final_audio_path = os.path.join(job_tmp, "final_audio.wav")
+            video_service.mix_with_background_music(dubbed_track_path, background_music_path, final_audio_path)
+
         supabase_service.update_dubbing_job(job_id, stage="Merging with video", progress=88)
         output_local_path = os.path.join(job_tmp, "output.mp4")
-        video_service.merge_audio_into_video(local_video_path, dubbed_track_path, output_local_path)
+        video_service.merge_audio_into_video(local_video_path, final_audio_path, output_local_path)
 
         supabase_service.update_dubbing_job(job_id, stage="Uploading final video", progress=95)
         output_bucket_path = f"jobs/{job_id}/output.mp4"
@@ -96,5 +120,5 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
         supabase_service.update_dubbing_job(job_id, status="failed", stage="Failed", error_message=str(exc))
 
     finally:
-        shutil.rmtree(job_tmp, ignore_errors=True)
-        
+        if job_tmp and os.path.isdir(job_tmp):
+            shutil.rmtree(job_tmp, ignore_errors=True)

@@ -28,6 +28,8 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
         local_video_path = os.path.join(job_tmp, "source" + os.path.splitext(video_bucket_path)[1])
         supabase_service.download_to_file(supabase_service.VIDEO_UPLOADS_BUCKET, video_bucket_path, local_video_path)
 
+        video_service.validate_video(local_video_path)
+
         supabase_service.update_dubbing_job(job_id, stage="Extracting audio", progress=12)
         audio_path = os.path.join(job_tmp, "source_audio.wav")
         video_service.extract_audio(local_video_path, audio_path)
@@ -122,3 +124,4 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
     finally:
         if job_tmp and os.path.isdir(job_tmp):
             shutil.rmtree(job_tmp, ignore_errors=True)
+            

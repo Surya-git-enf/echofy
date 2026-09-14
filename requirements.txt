@@ -9,3 +9,4 @@ fish-audio-sdk
 edge-tts>=6.1.19
 gTTS==2.5.3
 audio-separator[cpu]
+audioread==3.1.0

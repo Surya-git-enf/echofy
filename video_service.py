@@ -146,16 +146,32 @@ def separate_vocals(audio_path: str, work_dir: str) -> tuple:
 
 
 def mix_with_background_music(dubbed_track_path: str, background_music_path: str, output_path: str,
-                               duck_threshold: float = 0.05, duck_ratio: float = 8.0):
+                               speech_windows: list, duck_volume: float = 0.3):
     """
-    Sidechain auto-ducking: the background music automatically gets quieter
-    whenever the dubbed voice is speaking, and comes back up during pauses —
-    instead of a flat constant volume reduction the whole way through.
+    Exact volume automation, not approximate sidechain compression: since
+    we already know precisely when the dubbed voice speaks (each TTS
+    segment's start/end), the background track is set to `duck_volume`
+    during those exact windows and left at its original (100%) level
+    everywhere else — a real two-level switch, not a compressor's
+    proportional response to signal level.
+
+    speech_windows: list of (start_seconds, end_seconds) tuples.
     """
-    filter_complex = (
-        f"[1:a][0:a]sidechaincompress=threshold={duck_threshold}:ratio={duck_ratio}:attack=5:release=250:makeup=1[ducked_music];"
-        f"[0:a][ducked_music]amix=inputs=2:duration=longest:normalize=0[out]"
-    )
+    if speech_windows:
+        # One `volume` stage per window; each is only active (enable=...)
+        # during its own [start, end] range — outside that range every
+        # stage passes audio through unchanged, so untouched regions stay
+        # at the background track's original 100% level.
+        stages = [
+            f"volume={duck_volume}:enable='between(t,{start},{end})'"
+            for start, end in speech_windows
+        ]
+        bg_filter = ",".join(stages)
+    else:
+        bg_filter = "anull"  # no speech at all — leave background untouched
+
+    filter_complex = f"[1:a]{bg_filter}[ducked_music];[0:a][ducked_music]amix=inputs=2:duration=longest:normalize=0[out]"
+
     cmd = [
         "ffmpeg", "-y", "-hide_banner",
         "-i", dubbed_track_path,

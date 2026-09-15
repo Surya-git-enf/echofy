@@ -69,7 +69,11 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
                 text, target_language, seg_audio_path,
                 engine=voice_engine, character_profile=character_profile, emotion=emotion,
             )
-            segment_files.append({"start": float(seg.get("start", 0)), "path": seg_audio_path})
+            segment_files.append({
+                "start": float(seg.get("start", 0)),
+                "end": float(seg.get("end", seg.get("start", 0))),
+                "path": seg_audio_path,
+            })
 
             seg_bucket_path = f"jobs/{job_id}/segments/{i}_{uuid.uuid4().hex[:8]}.mp3"
             supabase_service.upload_file(
@@ -101,7 +105,8 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
         if preserve_background_music and background_music_path:
             supabase_service.update_dubbing_job(job_id, stage="Remixing with original background music", progress=82)
             final_audio_path = os.path.join(job_tmp, "final_audio.wav")
-            video_service.mix_with_background_music(dubbed_track_path, background_music_path, final_audio_path)
+            speech_windows = [(seg["start"], seg["end"]) for seg in segment_files]
+            video_service.mix_with_background_music(dubbed_track_path, background_music_path, final_audio_path, speech_windows)
 
         supabase_service.update_dubbing_job(job_id, stage="Merging with video", progress=88)
         output_local_path = os.path.join(job_tmp, "output.mp4")

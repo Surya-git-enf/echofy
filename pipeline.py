@@ -42,8 +42,10 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
             # speed; the whole original audio track gets replaced (no music
             # preserved) unless this flag is explicitly turned on.
             supabase_service.update_dubbing_job(job_id, stage="Separating vocals from music", progress=22)
-            vocals_path, background_music_path = video_service.separate_vocals(audio_path, job_tmp)
-            transcribe_source_path = vocals_path
+            _, background_music_path = video_service.separate_vocals(audio_path, job_tmp)
+            # No separate clean vocals file with this technique — keep
+            # transcribing from the original full audio (transcribe_source_path
+            # stays as audio_path, set above).
 
         supabase_service.update_dubbing_job(job_id, stage="Transcribing & adapting dialogue", progress=35)
         lang_label = get_language(target_language)["label"]
@@ -124,4 +126,3 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
     finally:
         if job_tmp and os.path.isdir(job_tmp):
             shutil.rmtree(job_tmp, ignore_errors=True)
-            

@@ -119,30 +119,30 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
 
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:
     """
-    Splits audio into (vocals_path, background_path) using audio-separator
-    (UVR's MDX-Net models), which is meaningfully faster on CPU than full
-    Demucs — though speed still scales with audio duration, not a flat
-    constant regardless of length.
+    Reduces center-panned vocals/dialogue using phase cancellation — pure
+    FFmpeg audio filtering, NO ML model loaded. Uses only a few MB of RAM,
+    fits comfortably under Render's 512MB free tier (unlike Demucs,
+    MDX-Net, or even "lite" Spleeter, which all need 1GB+ for their model).
+
+    Trade-off: meaningfully lower quality than any ML separator — some
+    vocal bleed remains, and other center-panned elements (bass, kick
+    drum) get slightly reduced too. Works best on professionally mixed
+    stereo content (movies, anime, most video) where dialogue is
+    center-panned — which is most of what you're dubbing.
+
+    Returns (None, background_path) — there is no separate clean vocals
+    file with this technique, so transcription should run on the
+    ORIGINAL full audio instead (Gemini handles that fine).
     """
-    from audio_separator.separator import Separator
-
-    models_dir = os.path.join(work_dir, "models_cache")
-    separator = Separator(output_dir=work_dir, model_file_dir=models_dir)
-    separator.load_model(model_filename="UVR-MDX-NET-Inst_HQ_3.onnx")
-    output_files = separator.separate(audio_path)
-
-    vocals_path, background_path = None, None
-    for f in output_files:
-        full_path = f if os.path.isabs(f) else os.path.join(work_dir, f)
-        if "(Vocals)" in f:
-            vocals_path = full_path
-        elif "(Instrumental)" in f:
-            background_path = full_path
-
-    if not vocals_path or not background_path:
-        raise FFmpegError(f"audio-separator did not produce expected vocal/instrumental stems: {output_files}")
-
-    return vocals_path, background_path
+    background_path = os.path.join(work_dir, "background_music.wav")
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner",
+        "-i", audio_path,
+        "-af", "pan=stereo|c0=0.5*c0+-0.5*c1|c1=-0.5*c0+0.5*c1",
+        background_path,
+    ]
+    _run(cmd)
+    return None, background_path
 
 
 def mix_with_background_music(dubbed_track_path: str, background_music_path: str, output_path: str,

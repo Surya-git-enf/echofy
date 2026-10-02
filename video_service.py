@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import requests
 import base64
+import time
 
 BATCH_SIZE = 25  # max simultaneous ffmpeg inputs per mix pass — keeps command size/memory sane
 
@@ -121,79 +122,115 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
 
 def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     """
-    Separate vocals using LALAL.AI API - returns (vocals_path, background_path)
-    Requires LALAL_API_KEY environment variable
+    Separate vocals using LALAL.AI API with proper asynchronous polling
+    Returns (vocals_path, background_path)
     """
     api_key = os.getenv("LALAL_API_KEY")
     if not api_key:
         raise RuntimeError("LALAL_API_KEY is not set. Please set it in Render environment variables.")
 
-    # Prepare file for upload
+    # Step 1: Upload file and get task ID
     with open(audio_path, "rb") as f:
         audio_data = f.read()
 
-    # Call LALAL.AI API for vocal separation
-    headers = {
+    upload_headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/octet-stream"
     }
 
-    files = {
+    upload_files = {
         "file": ("audio.wav", audio_data, "audio/wav")
     }
 
-    # Request stem separation (vocals + accompaniment)
-    data = {
-        "stem": "vocals"  # Request vocals stem; accompaniment will be available too
-    }
+    # Upload file
+    upload_response = requests.post(
+        "https://www.lalal.ai/api/v1/upload",
+        headers=upload_headers,
+        files=upload_files,
+        timeout=30
+    )
+    upload_response.raise_for_status()
+    upload_result = upload_response.json()
 
-    try:
-        response = requests.post(
-            "https://www.lalal.ai/api/v1/separate",
-            headers=headers,
-            files=files,
-            data=data,
-            timeout=30
-        )
-        response.raise_for_status()
-        result = response.json()
+    if not upload_result.get("success"):
+        raise RuntimeError(f"LALAL.AI upload failed: {upload_result.get('error')}")
 
-        if not result.get("success") or not result.get("result"):
-            raise RuntimeError(f"LALAL.AI API error: {result.get('error', 'Unknown error')}")
+    task_id = upload_result.get("result", {}).get("id")
+    if not task_id:
+        raise RuntimeError("LALAL.AI did not return task ID after upload")
 
-        # Get file URLs from response
-        # Note: LALAL.AI API structure may vary - adjust based on actual response format
-        # Typical structure: result -> [{"stem_file": "...", "stem_file": "..."}]
-        stem_files = result.get("result", {}).get("stem_files", {})
+    # Step 2: Poll for completion (max 2 minutes, check every 3 seconds)
+    max_attempts = 40  # 40 * 3s = 120 seconds
+    check_interval = 3  # seconds
 
-        vocals_url = stem_files.get("vocals")
-        accompaniment_url = stem_files.get("accompaniment")
+    for attempt in range(max_attempts):
+        try:
+            # Check task status
+            status_headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
 
-        if not vocals_url or not accompaniment_url:
-            raise RuntimeError("LALAL.AI API did not return expected stem files")
+            status_params = {
+                "id": task_id
+            }
 
-        # Download separated files
-        vocals_path = os.path.join(work_dir, "vocals_lalal.wav")
-        background_path = os.path.join(work_dir, "background_lalal.wav")
+            status_response = requests.get(
+                "https://www.lalal.ai/api/v1/check",
+                headers=status_headers,
+                params=status_params,
+                timeout=10
+            )
+            status_response.raise_for_status()
+            status_result = status_response.json()
 
-        # Download vocals
-        vocals_response = requests.get(vocals_url, timeout=30)
-        vocals_response.raise_for_status()
-        with open(vocals_path, "wb") as f:
-            f.write(vocals_response.content)
+            if not status_result.get("success"):
+                raise RuntimeError(f"LALAL.AI status check failed: {status_result.get('error')}")
 
-        # Download accompaniment (background)
-        background_response = requests.get(accompaniment_url, timeout=30)
-        background_response.raise_for_status()
-        with open(background_path, "wb") as f:
-            f.write(background_response.content)
+            task_result = status_result.get("result", {})
+            task_status = task_result.get("state")
 
-        return vocals_path, background_path
+            # Check if completed
+            if task_status == "completed":
+                # Get download URLs
+                result_files = task_result.get("result_files", {})
+                vocals_url = result_files.get("vocal")
+                background_url = result_files.get("accompaniment")
 
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"LALAL.AI API request failed: {str(e)}")
-    except Exception as e:
-        raise RuntimeError(f"LALAL.AI processing failed: {str(e)}")
+                if not vocals_url or not background_url:
+                    raise RuntimeError("LALAL.AI did not return expected file URLs after completion")
+
+                # Download separated files
+                vocals_path = os.path.join(work_dir, "vocals_lalal.wav")
+                background_path = os.path.join(work_dir, "background_lalal.wav")
+
+                # Download vocals
+                vocals_response = requests.get(vocals_url, timeout=30)
+                vocals_response.raise_for_status()
+                with open(vocals_path, "wb") as f:
+                    f.write(vocals_response.content)
+
+                # Download accompaniment (background)
+                background_response = requests.get(background_url, timeout=30)
+                background_response.raise_for_status()
+                with open(background_path, "wb") as f:
+                    f.write(background_response.content)
+
+                return vocals_path, background_path
+
+            elif task_status == "error":
+                raise RuntimeError(f"LALAL.AI processing error: {task_result.get('error', 'Unknown error')}")
+
+            # Still processing - wait and try again
+            if attempt < max_attempts - 1:  # Don't sleep on last attempt
+                time.sleep(check_interval)
+
+        except requests.exceptions.RequestException as e:
+            if attempt == max_attempts - 1:  # Last attempt
+                raise RuntimeError(f"LALAL.AI API request failed after {max_attempts} attempts: {str(e)}")
+            time.sleep(check_interval)  # Wait before retry
+
+    # If we get here, polling timed out
+    raise RuntimeError(f"LALAL.AI processing timed out after {max_attempts * check_interval} seconds")
 
 
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:

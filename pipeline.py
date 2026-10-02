@@ -36,16 +36,14 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
         total_duration = video_service.get_duration_seconds(local_video_path)
 
         background_music_path = None
+        vocals_path = None
         transcribe_source_path = audio_path
         if preserve_background_music:
-            # SLOW on CPU — roughly 5-10x real-time. Skipped by default for
-            # speed; the whole original audio track gets replaced (no music
-            # preserved) unless this flag is explicitly turned on.
+            # Use LALAL.AI for high-quality vocal separation (with FFmpeg fallback)
             supabase_service.update_dubbing_job(job_id, stage="Separating vocals from music", progress=22)
-            _, background_music_path = video_service.separate_vocals(audio_path, job_tmp)
-            # No separate clean vocals file with this technique — keep
-            # transcribing from the original full audio (transcribe_source_path
-            # stays as audio_path, set above).
+            vocals_path, background_music_path = video_service.separate_vocals(audio_path, job_tmp)
+            # NOW USE CLEAN VOCALS FOR TRANSCRIPTION - much cleaner input for Gemini!
+            transcribe_source_path = vocals_path if vocals_path is not None else audio_path
 
         supabase_service.update_dubbing_job(job_id, stage="Transcribing & adapting dialogue", progress=35)
         lang_label = get_language(target_language)["label"]
@@ -99,7 +97,7 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
 
         supabase_service.update_dubbing_job(job_id, stage="Mixing dubbed audio track", progress=75)
         dubbed_track_path = os.path.join(job_tmp, "dubbed_track.wav")
-        video_service.build_dubbed_track(segment_files, total_duration, dubbed_track_path)
+        video_service.build_dubbed_track(segment_files, total_duration_seconds, dubbed_track_path)
 
         final_audio_path = dubbed_track_path
         if preserve_background_music and background_music_path:

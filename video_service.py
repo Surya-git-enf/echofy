@@ -3,6 +3,8 @@ import json
 import os
 import subprocess
 import tempfile
+import requests
+import base64
 
 BATCH_SIZE = 25  # max simultaneous ffmpeg inputs per mix pass — keeps command size/memory sane
 
@@ -56,7 +58,7 @@ def _mix_batch(segment_batch: list, total_duration_seconds: float, output_path: 
     Mix one batch of segments (each with its own start-offset delay) into a
     single track. If base_track_path is given, it's mixed in as an
     additional input — this is how batches get combined incrementally
-    instead of needing every segment as one giant simultaneous input list.
+    instead of needing every segment as a simultaneous ffmpeg input at once.
     """
     inputs = []
     filter_parts = []
@@ -117,32 +119,105 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
         _run(["ffmpeg", "-y", "-hide_banner", "-i", running_track, output_path])
 
 
+def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
+    """
+    Separate vocals using LALAL.AI API - returns (vocals_path, background_path)
+    Requires LALAL_API_KEY environment variable
+    """
+    api_key = os.getenv("LALAL_API_KEY")
+    if not api_key:
+        raise RuntimeError("LALAL_API_KEY is not set. Please set it in Render environment variables.")
+
+    # Prepare file for upload
+    with open(audio_path, "rb") as f:
+        audio_data = f.read()
+
+    # Call LALAL.AI API for vocal separation
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/octet-stream"
+    }
+
+    files = {
+        "file": ("audio.wav", audio_data, "audio/wav")
+    }
+
+    # Request stem separation (vocals + accompaniment)
+    data = {
+        "stem": "vocals"  # Request vocals stem; accompaniment will be available too
+    }
+
+    try:
+        response = requests.post(
+            "https://www.lalal.ai/api/v1/separate",
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=30
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        if not result.get("success") or not result.get("result"):
+            raise RuntimeError(f"LALAL.AI API error: {result.get('error', 'Unknown error')}")
+
+        # Get file URLs from response
+        # Note: LALAL.AI API structure may vary - adjust based on actual response format
+        # Typical structure: result -> [{"stem_file": "...", "stem_file": "..."}]
+        stem_files = result.get("result", {}).get("stem_files", {})
+
+        vocals_url = stem_files.get("vocals")
+        accompaniment_url = stem_files.get("accompaniment")
+
+        if not vocals_url or not accompaniment_url:
+            raise RuntimeError("LALAL.AI API did not return expected stem files")
+
+        # Download separated files
+        vocals_path = os.path.join(work_dir, "vocals_lalal.wav")
+        background_path = os.path.join(work_dir, "background_lalal.wav")
+
+        # Download vocals
+        vocals_response = requests.get(vocals_url, timeout=30)
+        vocals_response.raise_for_status()
+        with open(vocals_path, "wb") as f:
+            f.write(vocals_response.content)
+
+        # Download accompaniment (background)
+        background_response = requests.get(accompaniment_url, timeout=30)
+        background_response.raise_for_status()
+        with open(background_path, "wb") as f:
+            f.write(background_response.content)
+
+        return vocals_path, background_path
+
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"LALAL.AI API request failed: {str(e)}")
+    except Exception as e:
+        raise RuntimeError(f"LALAL.AI processing failed: {str(e)}")
+
+
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:
     """
-    Reduces center-panned vocals/dialogue using phase cancellation — pure
-    FFmpeg audio filtering, NO ML model loaded. Uses only a few MB of RAM,
-    fits comfortably under Render's 512MB free tier (unlike Demucs,
-    MDX-Net, or even "lite" Spleeter, which all need 1GB+ for their model).
-
-    Trade-off: meaningfully lower quality than any ML separator — some
-    vocal bleed remains, and other center-panned elements (bass, kick
-    drum) get slightly reduced too. Works best on professionally mixed
-    stereo content (movies, anime, most video) where dialogue is
-    center-panned — which is most of what you're dubbing.
-
-    Returns (None, background_path) — there is no separate clean vocals
-    file with this technique, so transcription should run on the
-    ORIGINAL full audio instead (Gemini handles that fine).
+    Separate vocals - tries LALAL.AI first for quality, falls back to FFmpeg
+    Returns (vocals_path, background_path)
     """
-    background_path = os.path.join(work_dir, "background_music.wav")
-    cmd = [
-        "ffmpeg", "-y", "-hide_banner",
-        "-i", audio_path,
-        "-af", "pan=stereo|c0=0.5*c0+-0.5*c1|c1=-0.5*c0+0.5*c1",
-        background_path,
-    ]
-    _run(cmd)
-    return None, background_path
+    # Try LALAL.AI first for high-quality separation
+    try:
+        return separate_vocals_lalal(audio_path, work_dir)
+    except Exception as e:
+        # Log the error but fall back to FFmpeg
+        print(f"[video_service] LALAL.AI separation failed: {str(e)}. Falling back to FFmpeg.")
+
+        # FALLBACK: Original FFmpeg phase cancellation
+        background_path = os.path.join(work_dir, "background_music.wav")
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner",
+            "-i", audio_path,
+            "-af", "pan=stereo|c0=0.5*c0+-0.5*c1|c1=-0.5*c0+0.5*c1",
+            background_path,
+        ]
+        _run(cmd)
+        return None, background_path
 
 
 def mix_with_background_music(dubbed_track_path: str, background_music_path: str, output_path: str,

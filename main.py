@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 import pipeline
 import supabase_service
+import video_service
 from languages import is_supported, public_language_list
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -108,6 +109,18 @@ async def create_dub_job(
         if os.path.exists(local_temp_path):
             os.remove(local_temp_path)
         raise HTTPException(status_code=500, detail=f"Failed to receive uploaded file: {exc}") from exc
+
+    # Validate immediately, before wasting a Supabase upload on a broken file.
+    # This is the fix for the earlier truncation bug: a cut-off upload used to
+    # write/upload fine with no error, and only fail much later deep in the
+    # pipeline with a confusing raw ffmpeg error ("moov atom not found"). Catching
+    # it here means the user gets an immediate, clear "please re-upload" message,
+    # and nothing broken ever reaches Supabase storage.
+    try:
+        video_service.validate_video(local_temp_path)
+    except video_service.FFmpegError as exc:
+        os.remove(local_temp_path)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     video_bucket_path = f"uploads/{temp_id}{ext}"
     try:

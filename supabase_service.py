@@ -147,7 +147,7 @@ def create_dubbing_job(video_name: str, target_language: str, voice_engine: str,
     return result.data[0]["id"]
 
 
-def update_dobbing_job(job_id: str, **fields):
+def update_dubbing_job(job_id: str, **fields):
     if not fields:
         return
     client = get_client()

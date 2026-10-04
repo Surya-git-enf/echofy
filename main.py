@@ -4,8 +4,6 @@ import sys
 import traceback
 import uuid
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -41,6 +39,7 @@ def _job_public_view(job: dict) -> dict:
     view = {
         "job_id": job["id"],
         "status": job.get("status"),
+        "job": job.get("job"),
         "stage": job.get("stage"),
         "progress": job.get("progress", 0),
         "from_language": job.get("from_language"),
@@ -71,7 +70,7 @@ async def create_dub_job(
     voice_engine: str = Form("fish"),
     preserve_background_music: bool = Form(False),
 ):
-    ext = os.path.splitext(video.filename or "")[1].lower()
+    ext = os.path.splitext(video.filename or "").lower()
     if ext not in ALLOWED_VIDEO_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or 'unknown'}")
 
@@ -146,11 +145,16 @@ def get_dub_status(job_id: str):
     try:
         job = supabase_service.get_dubbing_job(job_id)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Failed to fetch job status: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to fetch job status: {exc}")
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return _job_public_view(job)
+
+
+@app.get("/status")
+def status():
+    return {"status": "i am good 😊"}
 
 
 @app.exception_handler(Exception)
@@ -163,4 +167,3 @@ async def unhandled_exception_handler(request, exc):
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 if os.path.isdir(FRONTEND_DIR):
     app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
-    

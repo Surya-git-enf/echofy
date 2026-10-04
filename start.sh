@@ -132,6 +132,25 @@ else
 fi
 
 # ==========================================
+# Configure Claude Permissions (No Prompts)
+# ==========================================
+echo "🔓 Configuring Auto-Approve Permissions..."
+
+mkdir -p ~/.claude
+cat << 'EOF' > ~/.claude/settings.json
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Write",
+      "Read"
+    ],
+    "defaultMode": "dontAsk"
+  }
+}
+EOF
+
+# ==========================================
 # Launch Claude
 # ==========================================
 echo "🚀 Launching Claude..."

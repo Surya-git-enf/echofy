@@ -97,7 +97,7 @@ def run_pipeline(job_id: str, video_bucket_path: str, target_language: str, voic
 
         supabase_service.update_dubbing_job(job_id, stage="Mixing dubbed audio track", progress=75)
         dubbed_track_path = os.path.join(job_tmp, "dubbed_track.wav")
-        video_service.build_dubbed_track(segment_files, total_duration_seconds, dubbed_track_path)
+        video_service.build_dubbed_track(segment_files, total_duration, dubbed_track_path)
 
         final_audio_path = dubbed_track_path
         if preserve_background_music and background_music_path:

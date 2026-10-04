@@ -165,7 +165,7 @@ def get_dub_status(job_id: str):
     return _job_public_view(job)
 
 
-@app.get("/status")
+@app.get("/")
 def status():
     return {"status": "i am good 😊"}
 

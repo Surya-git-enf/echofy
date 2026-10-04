@@ -4,7 +4,7 @@ All Supabase reads/writes go through this module.
 
 Key fix vs earlier version: supabase-py v2's storage upload requires
 file_options values to be STRINGS — passing upsert=True (a Python bool)
-or omitting content-type correctly is a common source of silent 500s.
+or omitting content-type correctly is a common silent failure point.
 Every public function here raises a clear, descriptive RuntimeError instead
 of letting the raw Supabase/httpx exception bubble up as an opaque 500.
 """
@@ -13,7 +13,7 @@ import os
 from supabase import Client, create_client
 
 VIDEO_UPLOADS_BUCKET = "video_uploads"
-DUBBING_OUTPUTS_BUCKET = "dubbing_outputs"
+DUBBING_OUTPUTS_BUCKET = "dubbings_outputs"
 
 _client: Client | None = None
 
@@ -41,6 +41,7 @@ def upload_file(bucket: str, path: str, local_file_path: str, content_type: str 
     except OSError as exc:
         raise RuntimeError(f"Could not read local file '{local_file_path}' to upload: {exc}") from exc
 
+    local_size = len(data)
     # supabase-py v2 requires ALL file_options values to be strings —
     # a bool here (upsert=True) is a common silent failure point.
     file_options = {
@@ -53,6 +54,45 @@ def upload_file(bucket: str, path: str, local_file_path: str, content_type: str 
     except Exception as exc:  # noqa: BLE001 — surface storage errors clearly
         raise RuntimeError(
             f"Supabase Storage upload failed for bucket='{bucket}' path='{path}': {exc}"
+        ) from exc
+
+    # Verify upload was not truncated by comparing local size with reported size
+    # Silent partial uploads caused a real production bug (an 11.27 MB file arrived as 1.43 MB with no error raised)
+    try:
+        # Determine parent folder and filename
+        if "/" in path:
+            parent_path = "/".join(path.split("/")[:-1])
+            filename = path.split("/")[-1]
+        else:
+            parent_path = ""
+            filename = path
+
+        # List objects in the parent folder
+        list_resp = client.storage.from_(bucket).list(parent_path)
+        # Find the object matching our filename
+        remote_size = None
+        for obj in list_resp:
+            if obj.get("name") == filename:
+                # Try common size fields: metadata.size or direct size
+                remote_size = obj.get("metadata", {}).get("size")
+                if remote_size is None:
+                    remote_size = obj.get("size")
+                break
+        if remote_size is None:
+            raise RuntimeError(
+                f"Upload verification failed for bucket='{bucket}' path='{path}': "
+                f"could not find uploaded object in storage list"
+            )
+        if local_size != remote_size:
+            raise RuntimeError(
+                f"Upload verification failed for bucket='{bucket}' path='{path}': "
+                f"local file is {local_size} bytes but Supabase reports {remote_size} bytes — upload was truncated."
+            )
+    except Exception as exc:
+        # If verification fails, we must not silently accept a potentially truncated upload
+        raise RuntimeError(
+            f"Upload verification failed for bucket='{bucket}' path='{path}': "
+            f"verification error: {exc}"
         ) from exc
 
 
@@ -107,7 +147,7 @@ def create_dubbing_job(video_name: str, target_language: str, voice_engine: str,
     return result.data[0]["id"]
 
 
-def update_dubbing_job(job_id: str, **fields):
+def update_dobbing_job(job_id: str, **fields):
     if not fields:
         return
     client = get_client()
@@ -117,12 +157,12 @@ def update_dubbing_job(job_id: str, **fields):
         print(f"[supabase_service] Failed to update dubbing_jobs id={job_id} with {fields}: {exc}")
 
 
-def get_dubbing_job(job_id: str) -> dict | None:
+def get_dobbing_job(job_id: str) -> dict | None:
     client = get_client()
     try:
         result = client.table("dubbing_jobs").select("*").eq("id", job_id).execute()
     except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"Failed to fetch dubbing_jobs id={job_id}: {exc}") from exc
+        raise RuntimeError(f"Failed to fetch dubbing_jobs id={job_id}: {error}") from exc
     return result.data[0] if result.data else None
 
 

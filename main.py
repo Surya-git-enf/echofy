@@ -70,7 +70,7 @@ async def create_dub_job(
     voice_engine: str = Form("fish"),
     preserve_background_music: bool = Form(False),
 ):
-    ext = os.path.splitext(video.filename or "").lower()
+    ext = os.path.splitext(video.filename or "")[1].lower()
     if ext not in ALLOWED_VIDEO_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext or 'unknown'}")
 

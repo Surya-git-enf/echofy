@@ -122,117 +122,131 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
 
 def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     """
-    Separate vocals using LALAL.AI API with proper asynchronous polling
-    Returns (vocals_path, background_path)
+    Separate vocals using LALAL.AI's current v1 API.
+    Returns (vocals_path, background_path).
+
+    Fixed from a previous version that was calling LALAL's OLD, retired API
+    (Authorization: Bearer, multipart upload, GET /check) which 405'd and
+    silently fell back to a crude FFmpeg phase-cancellation trick that
+    destroyed the background music instead of separating it cleanly.
+
+    Current API: X-License-Key header, raw-binary upload with a
+    Content-Disposition header, then POST /api/v1/split/ with a
+    'source_id' + nested 'presets' object (NOT a flat 'id'/'stem' body —
+    that was the mistake in the first fix), then poll POST /api/v1/check/
+    with a list of task_ids.
     """
-    api_key = os.getenv("LALAL_API_KEY")
-    if not api_key:
+    license_key = os.getenv("LALAL_API_KEY")
+    if not license_key:
         raise RuntimeError("LALAL_API_KEY is not set. Please set it in Render environment variables.")
 
-    # Step 1: Upload file and get task ID
+    auth_headers = {"X-License-Key": license_key}
+
+    # Step 1: Upload the raw file — filename goes in Content-Disposition,
+    # NOT as multipart form-data.
+    filename = os.path.basename(audio_path)
     with open(audio_path, "rb") as f:
         audio_data = f.read()
 
-    upload_headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/octet-stream"
-    }
-
-    upload_files = {
-        "file": ("audio.wav", audio_data, "audio/wav")
-    }
-
-    # Upload file
     upload_response = requests.post(
-        "https://www.lalal.ai/api/v1/upload",
-        headers=upload_headers,
-        files=upload_files,
-        timeout=30
+        "https://www.lalal.ai/api/v1/upload/",
+        headers={
+            **auth_headers,
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": "application/octet-stream",
+        },
+        data=audio_data,
+        timeout=60,
     )
     upload_response.raise_for_status()
     upload_result = upload_response.json()
 
-    if not upload_result.get("success"):
-        raise RuntimeError(f"LALAL.AI upload failed: {upload_result.get('error')}")
+    source_id = upload_result.get("id")
+    if not source_id:
+        raise RuntimeError(f"LALAL.AI upload did not return a source id: {upload_result}")
 
-    task_id = upload_result.get("result", {}).get("id")
+    # Step 2: Start a splitting task. 'stem': 'vocals' returns BOTH a
+    # "vocals" track and a "no_vocals" (background/instrumental) track —
+    # confirmed by the presets shape LALAL's /check/ response shows for a
+    # task_type of "split" (as opposed to the separate voice_clean/multistem
+    # endpoints, which take a differently-shaped body and aren't what we want).
+    split_response = requests.post(
+        "https://www.lalal.ai/api/v1/split/",
+        headers={**auth_headers, "Content-Type": "application/json"},
+        json={
+            "source_id": source_id,
+            "presets": {
+                "splitter": "perseus",
+                "stem": "vocals",
+                "dereverb_enabled": False,
+                "enhanced_processing_enabled": False,
+                "encoder_format": None,
+            },
+            "idempotency_key": None,
+        },
+        timeout=30,
+    )
+    split_response.raise_for_status()
+    split_result = split_response.json()
+
+    task_id = split_result.get("task_id")
     if not task_id:
-        raise RuntimeError("LALAL.AI did not return task ID after upload")
+        raise RuntimeError(f"LALAL.AI split did not return a task id: {split_result}")
 
-    # Step 2: Poll for completion (max 2 minutes, check every 3 seconds)
-    max_attempts = 40  # 40 * 3s = 120 seconds
-    check_interval = 3  # seconds
+    # Step 3: Poll /check/ (POST with task_ids list) until done — max 2 minutes.
+    max_attempts = 40
+    check_interval = 3
 
     for attempt in range(max_attempts):
         try:
-            # Check task status
-            status_headers = {
-                "Authorization": f"Bearer {api_key}"
-            }
-
-            status_params = {
-                "id": task_id
-            }
-
-            status_response = requests.get(
-                "https://www.lalal.ai/api/v1/check",
-                headers=status_headers,
-                params=status_params,
-                timeout=10
+            check_response = requests.post(
+                "https://www.lalal.ai/api/v1/check/",
+                headers={**auth_headers, "Content-Type": "application/json"},
+                json={"task_ids": [task_id]},
+                timeout=10,
             )
-            status_response.raise_for_status()
-            status_result = status_response.json()
+            check_response.raise_for_status()
+            check_result = check_response.json()
 
-            if not status_result.get("success"):
-                raise RuntimeError(f"LALAL.AI status check failed: {status_result.get('error')}")
+            task_info = check_result.get("result", {}).get(task_id, {})
+            status = task_info.get("status")
 
-            task_result = status_result.get("result", {})
-            task_status = task_result.get("state")
-
-            # Check if completed
-            if task_status == "completed":
-                # Get download URLs
-                result_files = task_result.get("result_files", {})
-                vocals_url = result_files.get("vocal")
-                background_url = result_files.get("accompaniment")
+            if status == "success":
+                tracks = task_info.get("result", {}).get("tracks", [])
+                vocals_url = next((t["url"] for t in tracks if t.get("label") == "vocals"), None)
+                background_url = next((t["url"] for t in tracks if t.get("label") == "no_vocals"), None)
 
                 if not vocals_url or not background_url:
-                    raise RuntimeError("LALAL.AI did not return expected file URLs after completion")
+                    raise RuntimeError(f"LALAL.AI completed but expected tracks are missing: {tracks}")
 
-                # Download separated files
                 vocals_path = os.path.join(work_dir, "vocals_lalal.wav")
                 background_path = os.path.join(work_dir, "background_lalal.wav")
 
-                # Download vocals
-                vocals_response = requests.get(vocals_url, timeout=30)
-                vocals_response.raise_for_status()
+                vocals_resp = requests.get(vocals_url, timeout=60)
+                vocals_resp.raise_for_status()
                 with open(vocals_path, "wb") as f:
-                    f.write(vocals_response.content)
+                    f.write(vocals_resp.content)
 
-                # Download accompaniment (background)
-                background_response = requests.get(background_url, timeout=30)
-                background_response.raise_for_status()
+                background_resp = requests.get(background_url, timeout=60)
+                background_resp.raise_for_status()
                 with open(background_path, "wb") as f:
-                    f.write(background_response.content)
+                    f.write(background_resp.content)
 
                 return vocals_path, background_path
 
-            elif task_status == "error":
-                raise RuntimeError(f"LALAL.AI processing error: {task_result.get('error', 'Unknown error')}")
+            elif status in ("error", "server_error"):
+                raise RuntimeError(f"LALAL.AI processing error: {task_info.get('error')}")
 
-            # Still processing - wait and try again
-            if attempt < max_attempts - 1:  # Don't sleep on last attempt
+            # still "progress" — wait and poll again
+            if attempt < max_attempts - 1:
                 time.sleep(check_interval)
 
         except requests.exceptions.RequestException as e:
-            if attempt == max_attempts - 1:  # Last attempt
+            if attempt == max_attempts - 1:
                 raise RuntimeError(f"LALAL.AI API request failed after {max_attempts} attempts: {str(e)}")
-            time.sleep(check_interval)  # Wait before retry
+            time.sleep(check_interval)
 
-    # If we get here, polling timed out
     raise RuntimeError(f"LALAL.AI processing timed out after {max_attempts * check_interval} seconds")
-
-
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:
     """
     Separate vocals - tries LALAL.AI first for quality, falls back to FFmpeg

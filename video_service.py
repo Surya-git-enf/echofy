@@ -271,32 +271,36 @@ def separate_vocals(audio_path: str, work_dir: str) -> tuple:
         return None, background_path
 
 
-def mix_with_background_music(dubbed_track_path: str, background_music_path: str, output_path: str,
-                               speech_windows: list, duck_volume: float = 0.3):
+def mix_with_background_music(dubbed_track_path, background_music_path, output_path,
+                               speech_windows=None, duck_db: float = 7):
     """
-    Exact volume automation, not approximate sidechain compression: since
-    we already know precisely when the dubbed voice speaks (each TTS
-    segment's start/end), the background track is set to `duck_volume`
-    during those exact windows and left at its original (100%) level
-    everywhere else — a real two-level switch, not a compressor's
-    proportional response to signal level.
+    True sidechain ducking: the background track is automatically
+    attenuated whenever the dubbed dialogue track actually has signal,
+    and springs back to full volume the instant dialogue goes silent —
+    reacting to the real audio, not a fixed list of start/end windows.
 
-    speech_windows: list of (start_seconds, end_seconds) tuples.
+    This replaces the old per-segment 'volume=...:enable=between(...)'
+    approach, which stacked one ducking window per TTS segment and could
+    crush the background to near-silence for almost the entire video on
+    any clip with lots of back-to-back dialogue — which is exactly what
+    was happening.
+
+    Also applies a final loudness normalization pass to -14 LUFS (the
+    standard streaming/broadcast loudness target) so the mixed result
+    has a consistent, professional level instead of sounding randomly
+    quiet or harsh.
+
+    `speech_windows` is accepted but no longer used — sidechain
+    compression reacts to the real signal, so explicit windows aren't
+    needed. Kept as a parameter so existing callers don't need to change.
     """
-    if speech_windows:
-        # One `volume` stage per window; each is only active (enable=...)
-        # during its own [start, end] range — outside that range every
-        # stage passes audio through unchanged, so untouched regions stay
-        # at the background track's original 100% level.
-        stages = [
-            f"volume={duck_volume}:enable='between(t,{start},{end})'"
-            for start, end in speech_windows
-        ]
-        bg_filter = ",".join(stages)
-    else:
-        bg_filter = "anull"  # no speech at all — leave background untouched
+    threshold = 10 ** (-duck_db / 20)  # convert dB target to a linear threshold
 
-    filter_complex = f"[1:a]{bg_filter}[ducked_music];[0:a][ducked_music]amix=inputs=2:duration=longest:normalize=0[out]"
+    filter_complex = (
+        f"[1:a][0:a]sidechaincompress=threshold={threshold}:ratio=8:attack=5:release=300[ducked_bg];"
+        f"[0:a][ducked_bg]amix=inputs=2:duration=longest:normalize=0,"
+        f"loudnorm=I=-14:TP=-1.5:LRA=11[out]"
+    )
 
     cmd = [
         "ffmpeg", "-y", "-hide_banner",
@@ -307,7 +311,6 @@ def mix_with_background_music(dubbed_track_path: str, background_music_path: str
         output_path,
     ]
     _run(cmd)
-
 
 def merge_audio_into_video(video_path: str, dubbed_audio_path: str, output_path: str):
     cmd = [

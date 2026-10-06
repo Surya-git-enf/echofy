@@ -122,19 +122,16 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
 
 def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     """
-    Separate vocals using LALAL.AI's current v1 API.
+    Separate vocals using LALAL.AI's /split/multistem/ endpoint.
     Returns (vocals_path, background_path).
 
-    Fixed from a previous version that was calling LALAL's OLD, retired API
-    (Authorization: Bearer, multipart upload, GET /check) which 405'd and
-    silently fell back to a crude FFmpeg phase-cancellation trick that
-    destroyed the background music instead of separating it cleanly.
-
-    Current API: X-License-Key header, raw-binary upload with a
-    Content-Disposition header, then POST /api/v1/split/ with a
-    'source_id' + nested 'presets' object (NOT a flat 'id'/'stem' body —
-    that was the mistake in the first fix), then poll POST /api/v1/check/
-    with a list of task_ids.
+    There is no generic /api/v1/split/ endpoint (that 404'd) — LALAL only
+    exposes /split/voice_clean/ (cleans a single voice stem, no backing
+    track returned) and /split/multistem/ (lets you request any set of
+    stems and returns a "no_multistem" track containing everything NOT
+    requested). Requesting stem_list=["vocals"] gives us exactly what we
+    need: a clean "vocals" track, and a "no_multistem" track that's the
+    full backing/background audio.
     """
     license_key = os.getenv("LALAL_API_KEY")
     if not license_key:
@@ -142,8 +139,6 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
 
     auth_headers = {"X-License-Key": license_key}
 
-    # Step 1: Upload the raw file — filename goes in Content-Disposition,
-    # NOT as multipart form-data.
     filename = os.path.basename(audio_path)
     with open(audio_path, "rb") as f:
         audio_data = f.read()
@@ -165,22 +160,17 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     if not source_id:
         raise RuntimeError(f"LALAL.AI upload did not return a source id: {upload_result}")
 
-    # Step 2: Start a splitting task. 'stem': 'vocals' returns BOTH a
-    # "vocals" track and a "no_vocals" (background/instrumental) track —
-    # confirmed by the presets shape LALAL's /check/ response shows for a
-    # task_type of "split" (as opposed to the separate voice_clean/multistem
-    # endpoints, which take a differently-shaped body and aren't what we want).
     split_response = requests.post(
-        "https://www.lalal.ai/api/v1/split/",
+        "https://www.lalal.ai/api/v1/split/multistem/",
         headers={**auth_headers, "Content-Type": "application/json"},
         json={
             "source_id": source_id,
             "presets": {
-                "splitter": "perseus",
-                "stem": "vocals",
+                "splitter": "auto",
                 "dereverb_enabled": False,
-                "enhanced_processing_enabled": False,
                 "encoder_format": None,
+                "stem_list": ["vocals"],
+                "extraction_level": "normal",
             },
             "idempotency_key": None,
         },
@@ -193,7 +183,6 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     if not task_id:
         raise RuntimeError(f"LALAL.AI split did not return a task id: {split_result}")
 
-    # Step 3: Poll /check/ (POST with task_ids list) until done — max 2 minutes.
     max_attempts = 40
     check_interval = 3
 
@@ -214,7 +203,7 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
             if status == "success":
                 tracks = task_info.get("result", {}).get("tracks", [])
                 vocals_url = next((t["url"] for t in tracks if t.get("label") == "vocals"), None)
-                background_url = next((t["url"] for t in tracks if t.get("label") == "no_vocals"), None)
+                background_url = next((t["url"] for t in tracks if t.get("label") == "no_multistem"), None)
 
                 if not vocals_url or not background_url:
                     raise RuntimeError(f"LALAL.AI completed but expected tracks are missing: {tracks}")
@@ -237,7 +226,6 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
             elif status in ("error", "server_error"):
                 raise RuntimeError(f"LALAL.AI processing error: {task_info.get('error')}")
 
-            # still "progress" — wait and poll again
             if attempt < max_attempts - 1:
                 time.sleep(check_interval)
 

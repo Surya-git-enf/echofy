@@ -4,7 +4,6 @@ import os
 import subprocess
 import tempfile
 import requests
-import base64
 import time
 
 BATCH_SIZE = 25  # max simultaneous ffmpeg inputs per mix pass — keeps command size/memory sane
@@ -42,7 +41,7 @@ def get_duration_seconds(media_path: str) -> float:
     cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", media_path]
     result = _run(cmd)
     data = json.loads(result.stdout.decode())
-    return float(data["duration"])
+    return float(data["format"]["duration"])
 
 
 def extract_audio(video_path: str, audio_out_path: str):
@@ -67,17 +66,17 @@ def _mix_batch(segment_batch: list, total_duration_seconds: float, output_path: 
 
     if base_track_path:
         inputs += ["-i", base_track_path]
-        filter_parts.append(f"[{index}:a]anull[a{index}]")
+        filter_parts.append(f"[{input_index}:a]anull[a{input_index}]")
         input_index += 1
 
     for seg in segment_batch:
         inputs += ["-i", seg["path"]]
         delay_ms = max(0, int(seg["start"] * 1000))
-        filter_parts.append(f"[{index}:a]adelay={delay_ms}|{delay_ms}[a{index}]")
+        filter_parts.append(f"[{input_index}:a]adelay={delay_ms}|{delay_ms}[a{input_index}]")
         input_index += 1
 
     mix_inputs = "".join(f"[a{i}]" for i in range(input_index))
-    filter_complex = ";".join(f"[a{i}]" for i in range(input_index)) + f";{mix_inputs}amix=inputs={x}:duration=longest:normalize=0[out]"
+    filter_complex = ";".join(filter_parts) + f";{mix_inputs}amix=inputs={input_index}:duration=longest:normalize=0[out]"
 
     cmd = [
         "ffmpeg", "-y", "-hide_banner", *inputs,
@@ -91,7 +90,7 @@ def _mix_batch(segment_batch: list, total_duration_seconds: float, output_path: 
 
 def build_dubbed_track(segment_files: list, total_duration_seconds: float, output_path: str):
     """
-    Scales to any number of segments (needs to be long videos — a 20 min
+    Scales to any number of segments (needed for long videos — a 20 min
     video can produce hundreds of segments) by mixing in batches of
     BATCH_SIZE, folding each batch's result into a running combined track,
     instead of passing every segment as a simultaneous ffmpeg input at once.
@@ -110,10 +109,10 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
         running_track = None
 
         for batch_start in range(0, len(segment_files), BATCH_SIZE):
-            batch = batch_files[batch_start:batch_start + BATCH_SIZE]
+            batch = segment_files[batch_start:batch_start + BATCH_SIZE]
             batch_output = os.path.join(tmp_dir, f"batch_{batch_start}.wav")
 
-            _mix_batch(batch, total_seconds, batch_output, base_track_path=running_track)
+            _mix_batch(batch, total_duration_seconds, batch_output, base_track_path=running_track)
             running_track = batch_output
 
         # copy the final running track to the requested output path
@@ -125,57 +124,57 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     Separate vocals using LALAL.AI's /split/multistem/ endpoint.
     Returns (vocals_path, background_path).
     """
-    license_key = os.getenv('LALAL_API_KEY')
+    license_key = os.getenv("LALAL_API_KEY")
     if not license_key:
-        raise RuntimeError('LALAL_API_KEY is not set. Please set it in Render environment variables.')
+        raise RuntimeError("LALAL_API_KEY is not set. Please set it in Render environment variables.")
 
-    auth_headers = {'X-License-Key': license_key}
+    auth_headers = {"X-License-Key": license_key}
 
     filename = os.path.basename(audio_path)
-    with open(audio_path, 'rb') as f:
+    with open(audio_path, "rb") as f:
         audio_data = f.read()
 
     upload_response = requests.post(
-        'https://www.lalal.ai/api/v1/upload/',
+        "https://www.lalal.ai/api/v1/upload/",
         headers={
             **auth_headers,
-            'Content-Disposition': f'attachment; filename={filename}',
-            'Content-Type': 'application/octet-stream',
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": "application/octet-stream",
         },
         data=audio_data,
         timeout=60,
     )
     if not upload_response.ok:
-        raise RuntimeError(f'LALAL.AI upload failed ({upload_response.status_code}): {upload_response.text}')
+        raise RuntimeError(f"LALAL.AI upload failed ({upload_response.status_code}): {upload_response.text}")
     upload_result = upload_response.json()
 
-    source_id = upload_result.get('id')
+    source_id = upload_result.get("id")
     if not source_id:
-        raise RuntimeError(f'LALAL.AI upload did not return a source id: {upload_result}')
+        raise RuntimeError(f"LALAL.AI upload did not return a source id: {upload_result}")
 
     split_response = requests.post(
-        'https://www.lalal.ai/api/v1/split/multistem/',
-        headers={**auth_headers, 'Content-Type': 'application/json'},
+        "https://www.lalal.ai/api/v1/split/multistem/",
+        headers={**auth_headers, "Content-Type": "application/json"},
         json={
-            'source_id': source_id,
-            'presets': {
-                'splitter': 'auto',
-                'dereverb_enabled': False,
-                'encoder_format': None,
-                'stem_list': ['vocals'],
-                'extraction_level': 'deep_extraction',
+            "source_id": source_id,
+            "presets": {
+                "splitter": "auto",
+                "dereverb_enabled": False,
+                "encoder_format": None,
+                "stem_list": ["vocals"],
+                "extraction_level": "deep_extraction",
             },
-            'idempotency_key': None,
+            "idempotency_key": None,
         },
         timeout=30,
     )
     if not split_response.ok:
-        raise RuntimeError(f'LALAL.AI split failed ({split_response.status_code}): {split_response.text}')
+        raise RuntimeError(f"LALAL.AI split failed ({split_response.status_code}): {split_response.text}")
     split_result = split_response.json()
 
-    task_id = split_result.get('task_id')
+    task_id = split_result.get("task_id")
     if not task_id:
-        raise RuntimeError(f'LALAL.AI split did not return a task id: {split_result}')
+        raise RuntimeError(f"LALAL.AI split did not return a task id: {split_result}")
 
     max_attempts = 40
     check_interval = 3
@@ -183,43 +182,43 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     for attempt in range(max_attempts):
         try:
             check_response = requests.post(
-                'https://www.lalal.ai/api/v1/check/',
-                headers={**auth_headers, 'Content-Type': 'application/json'},
-                json={'task_ids': [task_id]},
+                "https://www.lalal.ai/api/v1/check/",
+                headers={**auth_headers, "Content-Type": "application/json"},
+                json={"task_ids": [task_id]},
                 timeout=10,
             )
             if not check_response.ok:
-                raise RuntimeError(f'LALAL.AI check failed ({check_response.status_code}): {check_response.text}')
+                raise RuntimeError(f"LALAL.AI check failed ({check_response.status_code}): {check_response.text}")
             check_result = check_response.json()
 
-            task_info = check_result.get('result', {}).get(task_id, {})
-            status = task_info.get('status')
+            task_info = check_result.get("result", {}).get(task_id, {})
+            status = task_info.get("status")
 
-            if status == 'success':
-                tracks = task_info.get('result', {}).get('tracks', [])
-                vocals_url = next((t['url'] for t in tracks if t.get('label') == 'vocals'), None)
-                background_url = next((t['url'] for t in tracks if t.get('label') == 'no_multistem'), None)
+            if status == "success":
+                tracks = task_info.get("result", {}).get("tracks", [])
+                vocals_url = next((t["url"] for t in tracks if t.get("label") == "vocals"), None)
+                background_url = next((t["url"] for t in tracks if t.get("label") == "no_multistem"), None)
 
                 if not vocals_url or not background_url:
-                    raise RuntimeError(f'LALAL.AI completed but expected tracks are missing: {tracks}')
+                    raise RuntimeError(f"LALAL.AI completed but expected tracks are missing: {tracks}")
 
-                vocals_path = os.path.join(work_dir, 'vocals_lalal.wav')
-                background_path = os.path.join(work_dir, 'background_lalal.wav')
+                vocals_path = os.path.join(work_dir, "vocals_lalal.wav")
+                background_path = os.path.join(work_dir, "background_lalal.wav")
 
                 vocals_resp = requests.get(vocals_url, timeout=60)
                 vocals_resp.raise_for_status()
-                with open(vocals_path, 'wb') as f:
+                with open(vocals_path, "wb") as f:
                     f.write(vocals_resp.content)
 
                 background_resp = requests.get(background_url, timeout=60)
                 background_resp.raise_for_status()
-                with open(background_path, 'wb') as f:
+                with open(background_path, "wb") as f:
                     f.write(background_resp.content)
 
                 return vocals_path, background_path
 
-            elif status in ('error', 'server_error'):
-                raise RuntimeError(f'LALAL.AI processing error: {task_info.get("error")}')
+            elif status in ("error", "server_error"):
+                raise RuntimeError(f"LALAL.AI processing error: {task_info.get('error')}")
 
             # still processing - wait and try again
             if attempt < max_attempts - 1:  # Don't sleep on last attempt
@@ -227,11 +226,11 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
 
         except requests.exceptions.RequestException as e:
             if attempt == max_attempts - 1:  # Last attempt
-                raise RuntimeError(f'LALAL.AI API request failed after {max_attempts} attempts: {str(e)}')
+                raise RuntimeError(f"LALAL.AI API request failed after {max_attempts} attempts: {str(e)}")
             time.sleep(check_interval)  # Wait before retry
 
     # If we get here, polling timed out
-    raise RuntimeError(f'LALAL.AI processing timed out after {max_attempts * check_interval} seconds)
+    raise RuntimeError(f"LALAL.AI processing timed out after {max_attempts * check_interval} seconds")
 
 
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:
@@ -259,31 +258,34 @@ def separate_vocals(audio_path: str, work_dir: str) -> tuple:
 
 
 def mix_with_background_music(dubbed_track_path: str, background_music_path: str, output_path: str,
-                               speech_windows: list, duck_volume: float = 0.3):
+                               speech_windows: list = None, duck_db: float = 7):
     """
-    Exact volume automation, not approximate sidechain compression: since
-    we already know precisely when the dubbed voice speaks (each TTS
-    segment's start/end), the background track is set to `duck_volume`
-    during those exact windows and left at its original (100%) level
-    everywhere else — a real two-level switch, not a compressor's
-    proportional response to signal level.
+    True sidechain ducking: the background track is automatically
+    attenuated whenever the dubbed dialogue track actually has signal,
+    and springs back to full volume the instant dialogue goes silent —
+    reacting to the real audio, not a fixed list of start/end windows.
 
-    speech_windows: list of (start_seconds, end_seconds) tuples.
+    This replaces the old per-segment 'volume=...:enable=between(...)'
+    approach, which stacked one ducking window per TTS segment and could
+    crush the background to near-silence for almost the entire video on
+    any clip with lots of back-to-back dialogue.
+
+    Also applies a final loudness normalization pass to -14 LUFS (the
+    standard streaming/broadcast loudness target) so the mixed result
+    has a consistent, professional level instead of sounding randomly
+    quiet or harsh.
+
+    `speech_windows` is accepted but no longer used — sidechain
+    compression reacts to the real signal, so explicit windows aren't
+    needed. Kept as a parameter so existing callers don't need to change.
     """
-    if speech_windows:
-        # One `volume` stage per window; each is only active (enable=...)
-        # during its own [start, end] range — outside that range every
-        # stage passes audio through unchanged, so untouched regions stay
-        # at the background track's original 100% level.
-        stages = [
-            f"volume={duck_volume}:enable='between(t,{start},{end})'"
-            for start, end in speech_windows
-        ]
-        bg_filter = ",".join(stages)
-    else:
-        bg_filter = "anull"  # no speech at all — leave background untouched
+    threshold = 10 ** (-duck_db / 20)  # convert dB target to a linear threshold
 
-    filter_complex = f"[1:a]{bg_filter}[ducked_music];[0:a][ducked_music]amix=inputs=2:duration=longest:normalize=0[out]"
+    filter_complex = (
+        f"[1:a][0:a]sidechaincompress=threshold={threshold}:ratio=8:attack=5:release=300[ducked_bg];"
+        f"[0:a][ducked_bg]amix=inputs=2:duration=longest:normalize=0,"
+        f"loudnorm=I=-14:TP=-1.5:LRA=11[out]"
+    )
 
     cmd = [
         "ffmpeg", "-y", "-hide_banner",

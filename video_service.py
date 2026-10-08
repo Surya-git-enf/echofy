@@ -39,10 +39,10 @@ def validate_video(media_path: str):
 
 
 def get_duration_seconds(media_path: str) -> float:
-    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", media_path]
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of": "json", media_path]
     result = _run(cmd)
     data = json.loads(result.stdout.decode())
-    return float(data["format"]["duration"])
+    return float(data["duration"])
 
 
 def extract_audio(video_path: str, audio_out_path: str):
@@ -73,7 +73,7 @@ def _mix_batch(segment_batch: list, total_duration_seconds: float, output_path: 
     for seg in segment_batch:
         inputs += ["-i", seg["path"]]
         delay_ms = max(0, int(seg["start"] * 1000))
-        filter_parts.append(f"[{input_index}:a]adelay={delay_ms}|{delay_ms}[a{input_index}]")
+        filter_parts.append(f"[{index}:a]adelay={delay_ms}|{delay_ms}[a{index}]")
         input_index += 1
 
     mix_inputs = "".join(f"[a{i}]" for i in range(input_index))
@@ -113,7 +113,7 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
             batch = batch_files[batch_start:batch_start + BATCH_SIZE]
             batch_output = os.path.join(tmp_dir, f"batch_{batch_start}.wav")
 
-            _mix_batch(batch, total_duration_seconds, batch_output, base_track_path=running_track)
+            _mix_batch(batch, total_seconds, batch_output, base_track_path=running_track)
             running_track = batch_output
 
         # copy the final running track to the requested output path
@@ -146,11 +146,7 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
         timeout=60,
     )
     if not upload_response.ok:
-<<<<<<< Updated upstream
-        raise RuntimeError(f"LALAL.AI upload failed ({upload_response.status_code}): {upload_response.text}")
-=======
         raise RuntimeError(f'LALAL.AI upload failed ({upload_response.status_code}): {upload_response.text}')
->>>>>>> Stashed changes
     upload_result = upload_response.json()
 
     source_id = upload_result.get('id')
@@ -158,18 +154,6 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
         raise RuntimeError(f'LALAL.AI upload did not return a source id: {upload_result}')
 
     split_response = requests.post(
-<<<<<<< Updated upstream
-        "https://www.lalal.ai/api/v1/split/multistem/",
-        headers={**auth_headers, "Content-Type": "application/json"},
-        json={
-            "source_id": source_id,
-            "presets": {
-                "splitter": "auto",
-                "dereverb_enabled": False,
-                "encoder_format": None,
-                "stem_list": ["vocals"],
-                "extraction_level": "deep_extraction",
-=======
         'https://www.lalal.ai/api/v1/split/multistem/',
         headers={**auth_headers, 'Content-Type': 'application/json'},
         json={
@@ -180,18 +164,13 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
                 'encoder_format': None,
                 'stem_list': ['vocals'],
                 'extraction_level': 'deep_extraction',
->>>>>>> Stashed changes
             },
             'idempotency_key': None,
         },
         timeout=30,
     )
     if not split_response.ok:
-<<<<<<< Updated upstream
-        raise RuntimeError(f"LALAL.AI split failed ({split_response.status_code}): {split_response.text}")
-=======
         raise RuntimeError(f'LALAL.AI split failed ({split_response.status_code}): {split_response.text}')
->>>>>>> Stashed changes
     split_result = split_response.json()
 
     task_id = split_result.get('task_id')
@@ -210,27 +189,16 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
                 timeout=10,
             )
             if not check_response.ok:
-<<<<<<< Updated upstream
-                raise RuntimeError(f"LALAL.AI check failed ({check_response.status_code}): {check_response.text}")
-=======
                 raise RuntimeError(f'LALAL.AI check failed ({check_response.status_code}): {check_response.text}')
->>>>>>> Stashed changes
             check_result = check_response.json()
 
             task_info = check_result.get('result', {}).get(task_id, {})
             status = task_info.get('status')
 
-<<<<<<< Updated upstream
-            if status == "success":
-                tracks = task_info.get("result", {}).get("tracks", [])
-                vocals_url = next((t["url"] for t in tracks if t.get("label") == "vocals"), None)
-                background_url = next((t["url"] for t in tracks if t.get("label") == "no_multistem"), None)
-=======
             if status == 'success':
                 tracks = task_info.get('result', {}).get('tracks', [])
                 vocals_url = next((t['url'] for t in tracks if t.get('label') == 'vocals'), None)
                 background_url = next((t['url'] for t in tracks if t.get('label') == 'no_multistem'), None)
->>>>>>> Stashed changes
 
                 if not vocals_url or not background_url:
                     raise RuntimeError(f'LALAL.AI completed but expected tracks are missing: {tracks}')
@@ -251,14 +219,10 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
                 return vocals_path, background_path
 
             elif status in ('error', 'server_error'):
-                raise RuntimeError(f'LALAL.AI processing error: {task_info.get('error')}')
+                raise RuntimeError(f'LALAL.AI processing error: {task_info.get('error')})
 
-<<<<<<< Updated upstream
-            if attempt < max_attempts - 1:
-=======
             # still processing - wait and try again
             if attempt < max_attempts - 1:  # Don't sleep on last attempt
->>>>>>> Stashed changes
                 time.sleep(check_interval)
 
         except requests.exceptions.RequestException as e:
@@ -267,7 +231,7 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
             time.sleep(check_interval)  # Wait before retry
 
     # If we get here, polling timed out
-    raise RuntimeError(f'LALAL.AI processing timed out after {max_attempts * check_interval} seconds')
+    raise RuntimeError(f'LALAL.AI processing timedout after {max_attempts * check_interval} seconds')
 
 
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:

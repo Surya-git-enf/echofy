@@ -123,6 +123,11 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     """
     Separate vocals using LALAL.AI's /split/multistem/ endpoint.
     Returns (vocals_path, background_path).
+
+    NOTE: multistem splitting is a paid-tier-only feature on LALAL.AI — a
+    free/basic license key will get a 400 "Premium license required" error
+    here every time. That's expected unless/until the account is upgraded;
+    separate_vocals() below falls back to self-hosted Spleeter in that case.
     """
     license_key = os.getenv("LALAL_API_KEY")
     if not license_key:
@@ -233,28 +238,47 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     raise RuntimeError(f"LALAL.AI processing timed out after {max_attempts * check_interval} seconds")
 
 
+def separate_vocals_spleeter(audio_path: str, work_dir: str) -> tuple:
+    """
+    Open-source vocal/background separation using Spleeter (2stems model),
+    run locally — no external API, no premium tier required. Used as the
+    fallback when LALAL.AI is unavailable or gated behind a paid plan.
+
+    Import is done lazily (inside the function) so the whole app doesn't
+    fail to start if Spleeter/TensorFlow aren't installed in an environment
+    where preserve_background_music is never used.
+    """
+    from spleeter.separator import Separator
+
+    separator = Separator("spleeter:2stems")
+    separator.separate_to_file(audio_path, work_dir, filename_format="{instrument}.wav")
+
+    # Spleeter names outputs "vocals.wav" and "accompaniment.wav" inside a
+    # subfolder named after the input file (minus extension).
+    base_name = os.path.splitext(os.path.basename(audio_path))[0]
+    output_dir = os.path.join(work_dir, base_name)
+
+    vocals_path = os.path.join(output_dir, "vocals.wav")
+    background_path = os.path.join(output_dir, "accompaniment.wav")
+
+    if not os.path.exists(vocals_path) or not os.path.exists(background_path):
+        raise RuntimeError(f"Spleeter did not produce expected output files in {output_dir}")
+
+    return vocals_path, background_path
+
+
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:
     """
-    Separate vocals - tries LALAL.AI first for quality, falls back to FFmpeg
+    Separate vocals — tries LALAL.AI first (if your account has access to
+    it), falls back to self-hosted Spleeter (open-source, no API cost, no
+    premium-tier requirement) if LALAL fails for any reason.
     Returns (vocals_path, background_path)
     """
-    # Try LALAL.AI first for high-quality separation
     try:
         return separate_vocals_lalal(audio_path, work_dir)
     except Exception as e:
-        # Log the error but fall back to FFmpeg
-        print(f"[video_service] LALAL.AI separation failed: {str(e)}. Falling back to FFmpeg.")
-
-        # FALLBACK: Original FFmpeg phase cancellation
-        background_path = os.path.join(work_dir, "background_music.wav")
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner",
-            "-i", audio_path,
-            "-af", "pan=stereo|c0=0.5*c0+-0.5*c1|c1=-0.5*c0+0.5*c1",
-            background_path,
-        ]
-        _run(cmd)
-        return None, background_path
+        print(f"[video_service] LALAL.AI separation failed: {str(e)}. Falling back to Spleeter.")
+        return separate_vocals_spleeter(audio_path, work_dir)
 
 
 def mix_with_background_music(dubbed_track_path: str, background_music_path: str, output_path: str,
@@ -265,15 +289,9 @@ def mix_with_background_music(dubbed_track_path: str, background_music_path: str
     and springs back to full volume the instant dialogue goes silent —
     reacting to the real audio, not a fixed list of start/end windows.
 
-    This replaces the old per-segment 'volume=...:enable=between(...)'
-    approach, which stacked one ducking window per TTS segment and could
-    crush the background to near-silence for almost the entire video on
-    any clip with lots of back-to-back dialogue.
-
     Also applies a final loudness normalization pass to -14 LUFS (the
     standard streaming/broadcast loudness target) so the mixed result
-    has a consistent, professional level instead of sounding randomly
-    quiet or harsh.
+    has a consistent, professional level.
 
     `speech_windows` is accepted but no longer used — sidechain
     compression reacts to the real signal, so explicit windows aren't

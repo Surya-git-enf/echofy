@@ -124,14 +124,6 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
     """
     Separate vocals using LALAL.AI's /split/multistem/ endpoint.
     Returns (vocals_path, background_path).
-
-    There is no generic /api/v1/split/ endpoint (that 404'd) — LALAL only
-    exposes /split/voice_clean/ (cleans a single voice stem, no backing
-    track returned) and /split/multistem/ (lets you request any set of
-    stems and returns a "no_multistem" track containing everything NOT
-    requested). Requesting stem_list=["vocals"] gives us exactly what we
-    need: a clean "vocals" track, and a "no_multistem" track that's the
-    full backing/background audio.
     """
     license_key = os.getenv("LALAL_API_KEY")
     if not license_key:
@@ -153,7 +145,8 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
         data=audio_data,
         timeout=60,
     )
-    upload_response.raise_for_status()
+    if not upload_response.ok:
+        raise RuntimeError(f"LALAL.AI upload failed ({upload_response.status_code}): {upload_response.text}")
     upload_result = upload_response.json()
 
     source_id = upload_result.get("id")
@@ -170,13 +163,14 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
                 "dereverb_enabled": False,
                 "encoder_format": None,
                 "stem_list": ["vocals"],
-                "extraction_level": "normal",
+                "extraction_level": "deep_extraction",
             },
             "idempotency_key": None,
         },
         timeout=30,
     )
-    split_response.raise_for_status()
+    if not split_response.ok:
+        raise RuntimeError(f"LALAL.AI split failed ({split_response.status_code}): {split_response.text}")
     split_result = split_response.json()
 
     task_id = split_result.get("task_id")
@@ -194,7 +188,8 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
                 json={"task_ids": [task_id]},
                 timeout=10,
             )
-            check_response.raise_for_status()
+            if not check_response.ok:
+                raise RuntimeError(f"LALAL.AI check failed ({check_response.status_code}): {check_response.text}")
             check_result = check_response.json()
 
             task_info = check_result.get("result", {}).get(task_id, {})

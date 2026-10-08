@@ -67,7 +67,7 @@ def _mix_batch(segment_batch: list, total_duration_seconds: float, output_path: 
 
     if base_track_path:
         inputs += ["-i", base_track_path]
-        filter_parts.append(f"[{input_index}:a]anull[a{input_index}]")
+        filter_parts.append(f"[{index}:a]anull[a{index}]")
         input_index += 1
 
     for seg in segment_batch:
@@ -77,7 +77,7 @@ def _mix_batch(segment_batch: list, total_duration_seconds: float, output_path: 
         input_index += 1
 
     mix_inputs = "".join(f"[a{i}]" for i in range(input_index))
-    filter_complex = ";".join(f"[a{i}]" for i in range(input_index)) + f";{mix_inputs}amix=inputs={input_index}:duration=longest:normalize=0[out]"
+    filter_complex = ";".join(f"[a{i}]" for i in range(input_index)) + f";{mix_inputs}amix=inputs={x}:duration=longest:normalize=0[out]"
 
     cmd = [
         "ffmpeg", "-y", "-hide_banner", *inputs,
@@ -219,7 +219,7 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
                 return vocals_path, background_path
 
             elif status in ('error', 'server_error'):
-                raise RuntimeError(f'LALAL.AI processing error: {task_info.get('error')})
+                raise RuntimeError(f'LALAL.AI processing error: {task_info.get("error")}')
 
             # still processing - wait and try again
             if attempt < max_attempts - 1:  # Don't sleep on last attempt
@@ -231,7 +231,7 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
             time.sleep(check_interval)  # Wait before retry
 
     # If we get here, polling timed out
-    raise RuntimeError(f'LALAL.AI processing timed out after {max_attempts * check_interval} seconds')
+    raise RuntimeError(f'LALAL.AI processing timed out after {max_attempts * check_interval} seconds)
 
 
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:

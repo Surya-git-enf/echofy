@@ -39,7 +39,7 @@ def validate_video(media_path: str):
 
 
 def get_duration_seconds(media_path: str) -> float:
-    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of": "json", media_path]
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", media_path]
     result = _run(cmd)
     data = json.loads(result.stdout.decode())
     return float(data["duration"])
@@ -77,7 +77,7 @@ def _mix_batch(segment_batch: list, total_duration_seconds: float, output_path: 
         input_index += 1
 
     mix_inputs = "".join(f"[a{i}]" for i in range(input_index))
-    filter_complex = ";".join(filter_parts) + f";{mix_inputs}amix=inputs={input_index}:duration=longest:normalize=0[out]"
+    filter_complex = ";".join(f"[a{i}]" for i in range(input_index)) + f";{mix_inputs}amix=inputs={input_index}:duration=longest:normalize=0[out]"
 
     cmd = [
         "ffmpeg", "-y", "-hide_banner", *inputs,
@@ -91,7 +91,7 @@ def _mix_batch(segment_batch: list, total_duration_seconds: float, output_path: 
 
 def build_dubbed_track(segment_files: list, total_duration_seconds: float, output_path: str):
     """
-    Scales to any number of segments (needed for long videos — a 20 min
+    Scales to any number of segments (needs to be long videos — a 20 min
     video can produce hundreds of segments) by mixing in batches of
     BATCH_SIZE, folding each batch's result into a running combined track,
     instead of passing every segment as a simultaneous ffmpeg input at once.
@@ -231,7 +231,7 @@ def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
             time.sleep(check_interval)  # Wait before retry
 
     # If we get here, polling timed out
-    raise RuntimeError(f'LALAL.AI processing timedout after {max_attempts * check_interval} seconds')
+    raise RuntimeError(f'LALAL.AI processing timed out after {max_attempts * check_interval} seconds')
 
 
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:

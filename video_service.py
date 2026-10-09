@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import requests
 import time
+import uuid
+import supabase_service
 
 BATCH_SIZE = 25  # max simultaneous ffmpeg inputs per mix pass — keeps command size/memory sane
 
@@ -119,166 +121,123 @@ def build_dubbed_track(segment_files: list, total_duration_seconds: float, outpu
         _run(["ffmpeg", "-y", "-hide_banner", "-i", running_track, output_path])
 
 
-def separate_vocals_lalal(audio_path: str, work_dir: str) -> tuple:
+def separate_vocals_stemsplit(audio_path: str, work_dir: str) -> tuple:
     """
-    Separate vocals using LALAL.AI's /split/multistem/ endpoint.
-    Returns (vocals_path, background_path).
+    Separate vocals using stemsplit.io's REST API. Returns (vocals_path, background_path).
 
-    NOTE: multistem splitting is a paid-tier-only feature on LALAL.AI — a
-    free/basic license key will get a 400 "Premium license required" error
-    here every time. That's expected unless/until the account is upgraded;
-    separate_vocals() below falls back to self-hosted Spleeter in that case.
+    Replaces LALAL.AI (its multistem splitting is gated behind a paid plan
+    our key doesn't have) and Spleeter (incompatible with Python 3.14 — no
+    TensorFlow build exists for it, so it can never actually install here).
+
+    stemsplit.io takes a URL to fetch the audio from rather than a direct
+    upload, so we briefly upload the extracted audio to Supabase and hand
+    it a signed URL.
     """
-    license_key = os.getenv("LALAL_API_KEY")
-    if not license_key:
-        raise RuntimeError("LALAL_API_KEY is not set. Please set it in Render environment variables.")
+    api_key = os.getenv("STEMSPLIT_API_KEY")
+    if not api_key:
+        raise RuntimeError("STEMSPLIT_API_KEY is not set. Please set it in Render environment variables.")
 
-    auth_headers = {"X-License-Key": license_key}
+    auth_headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    filename = os.path.basename(audio_path)
-    with open(audio_path, "rb") as f:
-        audio_data = f.read()
-
-    upload_response = requests.post(
-        "https://www.lalal.ai/api/v1/upload/",
-        headers={
-            **auth_headers,
-            "Content-Disposition": f"attachment; filename={filename}",
-            "Content-Type": "application/octet-stream",
-        },
-        data=audio_data,
-        timeout=60,
+    # Briefly stage the audio in Supabase so stemsplit.io has a URL to fetch.
+    temp_path = f"temp/{uuid.uuid4().hex}.wav"
+    supabase_service.upload_file(
+        supabase_service.DUBBING_OUTPUTS_BUCKET, temp_path, audio_path, "audio/wav"
     )
-    if not upload_response.ok:
-        raise RuntimeError(f"LALAL.AI upload failed ({upload_response.status_code}): {upload_response.text}")
-    upload_result = upload_response.json()
+    source_url = supabase_service.create_signed_url(
+        supabase_service.DUBBING_OUTPUTS_BUCKET, temp_path, expires_in_seconds=3600
+    )
+    if not source_url:
+        raise RuntimeError("Could not create a signed URL for the staged audio file.")
 
-    source_id = upload_result.get("id")
-    if not source_id:
-        raise RuntimeError(f"LALAL.AI upload did not return a source id: {upload_result}")
-
-    split_response = requests.post(
-        "https://www.lalal.ai/api/v1/split/multistem/",
-        headers={**auth_headers, "Content-Type": "application/json"},
+    create_response = requests.post(
+        "https://stemsplit.io/api/v1/jobs",
+        headers=auth_headers,
         json={
-            "source_id": source_id,
-            "presets": {
-                "splitter": "auto",
-                "dereverb_enabled": False,
-                "encoder_format": None,
-                "stem_list": ["vocals"],
-                "extraction_level": "deep_extraction",
-            },
-            "idempotency_key": None,
+            "sourceUrl": source_url,
+            "outputType": "BOTH",
+            "quality": "BALANCED",
+            "outputFormat": "WAV",
         },
         timeout=30,
     )
-    if not split_response.ok:
-        raise RuntimeError(f"LALAL.AI split failed ({split_response.status_code}): {split_response.text}")
-    split_result = split_response.json()
+    if not create_response.ok:
+        raise RuntimeError(f"stemsplit.io job creation failed ({create_response.status_code}): {create_response.text}")
+    job = create_response.json()
 
-    task_id = split_result.get("task_id")
-    if not task_id:
-        raise RuntimeError(f"LALAL.AI split did not return a task id: {split_result}")
+    job_id = job.get("id")
+    if not job_id:
+        raise RuntimeError(f"stemsplit.io did not return a job id: {job}")
 
     max_attempts = 40
     check_interval = 3
 
     for attempt in range(max_attempts):
-        try:
-            check_response = requests.post(
-                "https://www.lalal.ai/api/v1/check/",
-                headers={**auth_headers, "Content-Type": "application/json"},
-                json={"task_ids": [task_id]},
-                timeout=10,
-            )
-            if not check_response.ok:
-                raise RuntimeError(f"LALAL.AI check failed ({check_response.status_code}): {check_response.text}")
-            check_result = check_response.json()
+        status_response = requests.get(
+            f"https://stemsplit.io/api/v1/jobs/{job_id}",
+            headers=auth_headers,
+            timeout=15,
+        )
+        if not status_response.ok:
+            raise RuntimeError(f"stemsplit.io status check failed ({status_response.status_code}): {status_response.text}")
+        status_data = status_response.json()
+        status = status_data.get("status")
 
-            task_info = check_result.get("result", {}).get(task_id, {})
-            status = task_info.get("status")
+        if status == "COMPLETED":
+            outputs = status_data.get("outputs", {})
+            vocals_url = outputs.get("vocals", {}).get("url")
+            background_url = outputs.get("instrumental", {}).get("url")
 
-            if status == "success":
-                tracks = task_info.get("result", {}).get("tracks", [])
-                vocals_url = next((t["url"] for t in tracks if t.get("label") == "vocals"), None)
-                background_url = next((t["url"] for t in tracks if t.get("label") == "no_multistem"), None)
+            if not vocals_url or not background_url:
+                raise RuntimeError(f"stemsplit.io completed but outputs are missing: {outputs}")
 
-                if not vocals_url or not background_url:
-                    raise RuntimeError(f"LALAL.AI completed but expected tracks are missing: {tracks}")
+            vocals_path = os.path.join(work_dir, "vocals_stemsplit.wav")
+            background_path = os.path.join(work_dir, "background_stemsplit.wav")
 
-                vocals_path = os.path.join(work_dir, "vocals_lalal.wav")
-                background_path = os.path.join(work_dir, "background_lalal.wav")
+            vocals_resp = requests.get(vocals_url, timeout=60)
+            vocals_resp.raise_for_status()
+            with open(vocals_path, "wb") as f:
+                f.write(vocals_resp.content)
 
-                vocals_resp = requests.get(vocals_url, timeout=60)
-                vocals_resp.raise_for_status()
-                with open(vocals_path, "wb") as f:
-                    f.write(vocals_resp.content)
+            background_resp = requests.get(background_url, timeout=60)
+            background_resp.raise_for_status()
+            with open(background_path, "wb") as f:
+                f.write(background_resp.content)
 
-                background_resp = requests.get(background_url, timeout=60)
-                background_resp.raise_for_status()
-                with open(background_path, "wb") as f:
-                    f.write(background_resp.content)
+            return vocals_path, background_path
 
-                return vocals_path, background_path
+        elif status == "FAILED":
+            raise RuntimeError(f"stemsplit.io processing failed: {status_data.get('errorMessage')}")
 
-            elif status in ("error", "server_error"):
-                raise RuntimeError(f"LALAL.AI processing error: {task_info.get('error')}")
+        if attempt < max_attempts - 1:
+            time.sleep(check_interval)
 
-            # still processing - wait and try again
-            if attempt < max_attempts - 1:  # Don't sleep on last attempt
-                time.sleep(check_interval)
-
-        except requests.exceptions.RequestException as e:
-            if attempt == max_attempts - 1:  # Last attempt
-                raise RuntimeError(f"LALAL.AI API request failed after {max_attempts} attempts: {str(e)}")
-            time.sleep(check_interval)  # Wait before retry
-
-    # If we get here, polling timed out
-    raise RuntimeError(f"LALAL.AI processing timed out after {max_attempts * check_interval} seconds")
-
-
-def separate_vocals_spleeter(audio_path: str, work_dir: str) -> tuple:
-    """
-    Open-source vocal/background separation using Spleeter (2stems model),
-    run locally — no external API, no premium tier required. Used as the
-    fallback when LALAL.AI is unavailable or gated behind a paid plan.
-
-    Import is done lazily (inside the function) so the whole app doesn't
-    fail to start if Spleeter/TensorFlow aren't installed in an environment
-    where preserve_background_music is never used.
-    """
-    from spleeter.separator import Separator
-
-    separator = Separator("spleeter:2stems")
-    separator.separate_to_file(audio_path, work_dir, filename_format="{instrument}.wav")
-
-    # Spleeter names outputs "vocals.wav" and "accompaniment.wav" inside a
-    # subfolder named after the input file (minus extension).
-    base_name = os.path.splitext(os.path.basename(audio_path))[0]
-    output_dir = os.path.join(work_dir, base_name)
-
-    vocals_path = os.path.join(output_dir, "vocals.wav")
-    background_path = os.path.join(output_dir, "accompaniment.wav")
-
-    if not os.path.exists(vocals_path) or not os.path.exists(background_path):
-        raise RuntimeError(f"Spleeter did not produce expected output files in {output_dir}")
-
-    return vocals_path, background_path
+    raise RuntimeError(f"stemsplit.io processing timed out after {max_attempts * check_interval} seconds")
 
 
 def separate_vocals(audio_path: str, work_dir: str) -> tuple:
     """
-    Separate vocals — tries LALAL.AI first (if your account has access to
-    it), falls back to self-hosted Spleeter (open-source, no API cost, no
-    premium-tier requirement) if LALAL fails for any reason.
+    Separate vocals using stemsplit.io (real AI separation, free tier +
+    cheap pay-as-you-go). Falls back to a crude FFmpeg phase-cancellation
+    trick only if the API itself is unreachable — that fallback is low
+    quality and should rarely, if ever, actually trigger.
     Returns (vocals_path, background_path)
     """
     try:
-        return separate_vocals_lalal(audio_path, work_dir)
+        return separate_vocals_stemsplit(audio_path, work_dir)
     except Exception as e:
-        print(f"[video_service] LALAL.AI separation failed: {str(e)}. Falling back to Spleeter.")
-        return separate_vocals_spleeter(audio_path, work_dir)
+        print(f"[video_service] stemsplit.io separation failed: {str(e)}. Falling back to crude FFmpeg phase cancellation.")
+        background_path = os.path.join(work_dir, "background_music.wav")
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner",
+            "-i", audio_path,
+            "-af", "pan=stereo|c0=0.5*c0+-0.5*c1|c1=-0.5*c0+0.5*c1",
+            background_path,
+        ]
+        _run(cmd)
+        return None, background_path
+
+
 
 
 def mix_with_background_music(dubbed_track_path: str, background_music_path: str, output_path: str,

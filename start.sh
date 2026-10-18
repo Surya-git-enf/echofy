@@ -24,27 +24,30 @@ uv tool install --force --python 3.14 \
   git+https://github.com/Alishahryar1/free-claude-code.git
 
 # ==========================================
-# Sync Claude Skills
+# Install Persistent Project Skills
 # ==========================================
-echo "🧠 Syncing Claude Skills..."
+echo "🧠 Installing requested Claude Skills into persistent workspace..."
 
-rm -rf ~/.claude/skills
-mkdir -p ~/.claude/skills
+# Install List 1 (Kept: Strix, Agent Reach, Setup)
+npx -y skills add usestrix/strix -y
+npx -y skills add Panniantong/agent-reach -y
+npx -y skills add https://github.com/anthropics/claude-plugins-official/tree/main/plugins/claude-code-setup -y
 
-TEMP_DIR=$(mktemp -d)
+# Install List 2 (Kept: TasteSkill, Web Guidelines, Image to Code, Awesome Design)
+npx -y skills add https://www.tasteskill.dev/ -y
+npx -y skills add https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines -y
+npx -y skills add https://github.com/Leonxlnx/taste-skill/tree/main/skills/image-to-code-skill -y
+npx -y skills add VoltAgent/awesome-design-md -y
 
-if git clone --quiet --depth 1 \
-  https://github.com/Surya-git-enf/Claude-skills.git "$TEMP_DIR"; then
+# Install List 3 (Kept: Find Skills, Superpowers, Task Observer)
+npx -y skills add vercel-labs/skills -y
+npx -y skills add obra/superpowers -y
+npx -y skills add rebelytics/one-skill-to-rule-them-all -y
 
-    find "$TEMP_DIR" -type f -iname "*.md" \
-      -exec cp {} ~/.claude/skills/ \;
+# Install Additional Request
+npx -y skills add latent-spaces/brag -y
 
-    echo "✅ Skills synced successfully"
-else
-    echo "❌ Failed to sync skills"
-fi
-
-rm -rf "$TEMP_DIR"
+echo "✅ All skills installed to local .claude/skills directory"
 
 # ==========================================
 # Configure Environment
@@ -106,4 +109,4 @@ chmod +x "$(which claude 2>/dev/null)" 2>/dev/null || true
 npx -y @anthropic-ai/claude-code \
   --continue \
   --dangerously-skip-permissions
-claude
+  

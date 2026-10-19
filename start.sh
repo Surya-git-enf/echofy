@@ -43,6 +43,7 @@ npx -y skills add VoltAgent/awesome-design-md -y
 npx -y skills add vercel-labs/skills -y
 npx -y skills add obra/superpowers -y
 npx -y skills add rebelytics/one-skill-to-rule-them-all -y
+npx -y skills add cosmix/loom
 
 # Install Additional Request
 npx -y skills add latent-spaces/brag -y

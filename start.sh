@@ -38,6 +38,7 @@ npx -y skills add https://www.tasteskill.dev/ -y
 npx -y skills add https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines -y
 npx -y skills add https://github.com/Leonxlnx/taste-skill/tree/main/skills/image-to-code-skill -y
 npx -y skills add VoltAgent/awesome-design-md -y
+npx -y skills add cosmix/loom
 
 # Install List 3 (Kept: Find Skills, Superpowers, Task Observer)
 npx -y skills add vercel-labs/skills -y

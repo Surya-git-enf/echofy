@@ -1,0 +1,34 @@
+{
+  "_about": "Measured from test/examples/Dubbed.mp4 and test/input/input.mp4. The reference is a three-panel clip comparing regional dubs (Hindi / English / Japanese) of one anime moment. It shows the target feel (energetic, colloquial, localised delivery over a lively soundtrack), NOT a script to copy and NOT a timeline to match. It has no transcript, so dialogue quality is judged by the Gemini judge in scripts/eval_dubbing.py, not by comparing text.",
+  "reference": {
+    "duration_seconds": 24.17,
+    "integrated_loudness_lufs": -18.6,
+    "loudness_range_lu": 4.4,
+    "sample_peak_dbfs": -4.0,
+    "speech_gaps_seconds": [0.48, 1.03, 0.73, 0.67, 0.66, 0.75, 0.26, 0.27, 0.48, 0.95, 0.90],
+    "audio": {"codec": "aac", "sample_rate": 44100, "channels": 2}
+  },
+  "input_example": {
+    "duration_seconds": 10.12,
+    "integrated_loudness_lufs": -22.4
+  },
+  "gate": {
+    "duration_tolerance_seconds": 0.5,
+    "loudness_lufs_min": -22.0,
+    "loudness_lufs_max": -14.0,
+    "true_peak_dbtp_max": -1.0,
+    "background_min_rms_dbfs": -60.0,
+    "background_gap_min_rms_dbfs": -52.0,
+    "background_swell_min_db": 2.0,
+    "voice_over_background_min_db": 6.0,
+    "voice_over_background_max_db": 26.0,
+    "dubbed_to_original_speech_ratio_min": 0.5,
+    "dubbed_to_original_speech_ratio_max": 1.7,
+    "fit_fraction_min": 0.9,
+    "fit_overflow_seconds": 0.3,
+    "max_speedup": 1.36,
+    "same_speaker_overlap_seconds": 0.3,
+    "script_match_min": 0.6,
+    "judge_min_score": 7
+  }
+}

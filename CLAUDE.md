@@ -76,6 +76,37 @@ Rules:
 
 ## Dubbing quality gate
 
+Echofy must dub a scene the way a real dubbing studio does: new voices in the target language over the ORIGINAL background music and effects, with every character having their own voice, in any language. This section is the definition of done for any change to the dubbing pipeline. It applies in every session.
+
+### Non-negotiables
+- Original background music/effects are ALWAYS kept. `preserve_background_music` is ignored on purpose. Never add a code path that outputs vocals-only audio.
+- Every character gets one stable, distinct voice (`voice_casting.py`). 4-5 characters in a scene must all sound different.
+- Any language must work. A language missing from `languages.py` is still accepted; `engine_can_speak()` rejects bad engine/language pairs early.
+- Dialogue is adapted, not translated word for word: native slang, natural loanwords, each character's own register (`gemini_service.py` prompt).
+- The dubbed audio track must cover the full video length (padded), or the video gets cut.
+
+### How to check your work
+- Offline, no keys needed (plumbing and gate logic): `python tests/test_offline_e2e.py`
+- Real run on every file in `test/input/`: `python scripts/run_local_dub.py --languages telugu hindi` (needs GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY, STEMSPLIT_API_KEY, FISH_AUDIO_API_KEY or `--engine edge`)
+- Re-score a finished run: `python scripts/eval_dubbing.py test/outputs/<input>__<language>`
+- `test/examples/Dubbed.mp4` is a loudness and feel reference only (a 3-panel clip of regional dubs). It has no transcript; do not copy it or match its timeline. Targets are in `test/reference_profile.json`.
+- Outputs go to `test/outputs/` (git-ignored). Stem separations are cached in `.cache/stems/` so reruns do not use up stemsplit.io minutes.
+- Add a multi-character test clip by dropping `test/input/<name>.mp4` plus `<name>.json` containing `{"expected_speakers": 4}`. Until one exists, the 4-5 character requirement is only covered by the offline test.
+
+### Pass condition
+`run_local_dub.py` exits 0 (PASS) for every input in at least two different languages, without editing the gate between runs. Exit 2 (PASS_UNJUDGED) means the Gemini dialogue judge did not run: fix that and rerun; it does not count as done. Exit 1 means FAIL: read the failing check names and values, fix the cause, rerun.
+
+### Rules while iterating
+- Fix causes, never thresholds. Do not edit `test/reference_profile.json` gate values or `scripts/eval_dubbing.py` to make a run pass; if a threshold looks wrong, stop and tell me why.
+- Do not overwrite or edit anything in `test/examples/` or `test/input/`.
+- Do not claim audio "sounds good". You cannot hear it. Report the gate numbers and say a human listen is still needed.
+- Stem separation uses paid credits beyond the free tier: rely on the cache, and ask before running a new input through stemsplit.io more than once.
+- Never read, print or commit `.env`. Keep secrets in Render env vars and Codespace secrets.
+- Stop after 25 gate runs without progress and report what is blocking.
+
+### Environment variables used by dubbing
+GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY, STEMSPLIT_API_KEY, FISH_AUDIO_API_KEY, FISH_VOICE_POOL (JSON `{"male": ["<fish voice id>"], "female": ["<fish voice id>"]}` so characters get different Fish voices; without it they share one voice and are only separated by pitch shift), optional FISH_VOICE_<ARCHETYPE>, DUB_ENGINE, STEM_CACHE_DIR.
+
 ## Persona: JARVIS (permanent, applies to every reply in this project)
 
 ### Identity

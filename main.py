@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 import pipeline
 import supabase_service
 import video_service
-from languages import is_supported, public_language_list
+from languages import engine_can_speak, is_supported, public_language_list
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCAL_TMP_DIR = os.path.join(BASE_DIR, "storage", "tmp")
@@ -69,7 +69,7 @@ async def create_dub_job(
     video: UploadFile = File(...),
     target_language: str = Form(...),
     voice_engine: str = Form("fish"),
-    preserve_background_music: bool = Form(False),
+    preserve_background_music: bool = Form(True),  # ignored: background music is always preserved
 ):
     ext = os.path.splitext(video.filename or "")[1].lower()
     if ext not in ALLOWED_VIDEO_EXTENSIONS:
@@ -77,6 +77,10 @@ async def create_dub_job(
 
     if not is_supported(target_language):
         raise HTTPException(status_code=400, detail=f"Unsupported target language: {target_language}")
+
+    can_speak, reason = engine_can_speak(voice_engine, target_language)
+    if not can_speak:
+        raise HTTPException(status_code=400, detail=reason)
 
     if voice_engine not in ALLOWED_VOICE_ENGINES:
         raise HTTPException(
@@ -147,7 +151,7 @@ async def create_dub_job(
         raise HTTPException(status_code=500, detail=f"Failed to create dubbing job record: {exc}") from exc
 
     background_tasks.add_task(
-        pipeline.run_pipeline, job_id, video_bucket_path, target_language, voice_engine, preserve_background_music,
+        pipeline.run_pipeline, job_id, video_bucket_path, target_language, voice_engine,
     )
 
     return {"job_id": job_id}

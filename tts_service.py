@@ -71,7 +71,7 @@ def strip_emotion_tags(text: str) -> str:
 
 # ---------------- Fish Audio (strict — no fallback) ----------------
 
-def generate_speech_fish(text: str, language_key: str, out_path: str, character_profile: str = "default"):
+def generate_speech_fish(text: str, language_key: str, out_path: str, character_profile: str = "default", voice: dict = None):
     api_key = os.getenv("FISH_AUDIO_API_KEY")
     if not api_key:
         raise RuntimeError(
@@ -79,7 +79,11 @@ def generate_speech_fish(text: str, language_key: str, out_path: str, character_
             "cannot run without this key."
         )
 
-    reference_id = ARCHETYPE_VOICE_MAP.get(character_profile, ARCHETYPE_VOICE_MAP["default"])
+    # Per-character voice from voice_casting wins; otherwise the archetype map
+    # (FISH_VOICE_<ARCHETYPE> env vars can fill it in without code changes).
+    reference_id = (voice or {}).get("fish_reference_id")
+    if not reference_id:
+        reference_id = ARCHETYPE_VOICE_MAP.get(character_profile) or os.getenv(f"FISH_VOICE_{character_profile.upper()}")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -161,19 +165,22 @@ def generate_speech_echofy(text: str, language_key: str, out_path: str, characte
 
 # ---------------- Edge-TTS ----------------
 
-def generate_speech_edge(text: str, language_key: str, out_path: str):
+def generate_speech_edge(text: str, language_key: str, out_path: str, voice: dict = None):
     import asyncio
     import edge_tts
 
     lang = get_language(language_key)
-    voice = lang.get("edge_voice")
-    if not voice:
+    spec = voice or {}
+    voice_name = spec.get("edge_voice") or lang.get("edge_voice")
+    if not voice_name:
         raise RuntimeError(f"No Edge voice configured for language: {language_key}")
 
+    pitch = f"{int(spec.get('edge_pitch_hz', 0)):+d}Hz"
+    rate = f"{int(spec.get('edge_rate_pct', 0)):+d}%"
     clean_text = strip_emotion_tags(text)
 
     async def _run():
-        communicate = edge_tts.Communicate(clean_text, voice)
+        communicate = edge_tts.Communicate(clean_text, voice_name, rate=rate, pitch=pitch)
         await communicate.save(out_path)
 
     asyncio.run(_run())
@@ -187,6 +194,8 @@ def generate_speech_sarvam(text: str, language_key: str, out_path: str):
         raise RuntimeError("SARVAM_API_KEY is not set. voice_engine='sarvam' cannot run without it.")
 
     lang = get_language(language_key)
+    if not lang.get("sarvam_code"):
+        raise RuntimeError(f"Sarvam does not support '{lang['label']}'.")
     clean_text = strip_emotion_tags(text)
 
     headers = {"api-subscription-key": api_key, "Content-Type": "application/json"}
@@ -211,6 +220,8 @@ def generate_speech_gtts(text: str, language_key: str, out_path: str):
     from gtts import gTTS
 
     lang = get_language(language_key)
+    if not lang.get("gtts_code"):
+        raise RuntimeError(f"gTTS does not support '{lang['label']}'.")
     clean_text = strip_emotion_tags(text)
     tts = gTTS(text=clean_text, lang=lang["gtts_code"])
     tts.save(out_path)
@@ -218,16 +229,16 @@ def generate_speech_gtts(text: str, language_key: str, out_path: str):
 
 # ---------------- Dispatcher — strict, no cross-engine fallback ----------------
 
-def generate_speech(text: str, language_key: str, out_path: str, engine: str = "echofy", character_profile: str = "default", emotion: str = "neutral"):
+def generate_speech(text: str, language_key: str, out_path: str, engine: str = "echofy", character_profile: str = "default", emotion: str = "neutral", voice: dict = None):
     if not text or not text.strip():
         return
 
     if engine == "fish":
-        generate_speech_fish(text, language_key, out_path, character_profile=character_profile)
+        generate_speech_fish(text, language_key, out_path, character_profile=character_profile, voice=voice)
     elif engine == "echofy":
         generate_speech_echofy(text, language_key, out_path, character_profile=character_profile, emotion=emotion)
     elif engine == "edge":
-        generate_speech_edge(text, language_key, out_path)
+        generate_speech_edge(text, language_key, out_path, voice=voice)
     elif engine == "sarvam":
         generate_speech_sarvam(text, language_key, out_path)
     elif engine == "gtts":

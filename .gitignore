@@ -1,0 +1,13 @@
+# secrets and local config
+.env
+.env.*
+
+# runtime and test output
+storage/
+.cache/
+test/outputs/
+proxy.log
+__pycache__/
+*.pyc
+graphify-out/
+.claude/skills/

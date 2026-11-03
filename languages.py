@@ -3,7 +3,7 @@
 Central language config. Every engine (gtts / sarvam / fish / edge / echofy)
 reads its codes from here.
 
-Any language can be requested. A language that is not in the table below
+Any language can be requested (engines differ in what they can speak; see engine_can_speak). A language that is not in the table below
 is still accepted: Gemini writes the dialogue in it, and the engine is
 checked up front by engine_can_speak() so an unsupported pairing fails
 immediately with a clear message instead of deep inside the pipeline.
@@ -21,7 +21,8 @@ import re
 # key, label, gtts_code, edge_locale, sarvam_code, edge_voice (last-resort), aliases
 _TABLE = [
     ("english",    "English",    "en",    "en-US", "en-IN", "en-IN-NeerjaNeural",   ("en", "eng")),
-    ("hindi",      "Hindi",      "hi",    "hi-IN", "hi-IN", "hi-IN-SwaraNeural",    ("hi", "hinglish")),
+    ("hindi",      "Hindi",      "hi",    "hi-IN", "hi-IN", "hi-IN-SwaraNeural",    ("hi",)),
+    ("hinglish",   "Hinglish",   "hi",    "hi-IN", "hi-IN", "hi-IN-SwaraNeural",    ("hi-en",)),
     ("telugu",     "Telugu",     "te",    "te-IN", "te-IN", "te-IN-ShrutiNeural",   ("te", "tenglish")),
     ("tamil",      "Tamil",      "ta",    "ta-IN", "ta-IN", "ta-IN-PallaviNeural",  ("ta", "tanglish")),
     ("kannada",    "Kannada",    "kn",    "kn-IN", "kn-IN", "kn-IN-SapnaNeural",    ("kn",)),
@@ -64,6 +65,13 @@ _TABLE = [
     ("malay",      "Malay",      None,    "ms-MY", None,    None,                   ("ms",)),
 ]
 
+# Vachana (Gnani) language codes. Voices on timbre-v3.0 speak all of these.
+_GNANI_CODES = {
+    "english": "en-IN", "hindi": "hi-IN", "hinglish": "hi-en", "telugu": "te-IN", "tamil": "ta-IN",
+    "kannada": "kn-IN", "malayalam": "ml-IN", "marathi": "mr-IN", "punjabi": "pa-IN",
+    "bengali": "bn-IN", "gujarati": "gu-IN",
+}
+
 SUPPORTED_LANGUAGES = {}
 _ALIASES = {}
 for _key, _label, _gtts, _locale, _sarvam, _edge, _aliases in _TABLE:
@@ -73,6 +81,7 @@ for _key, _label, _gtts, _locale, _sarvam, _edge, _aliases in _TABLE:
         "sarvam_code": _sarvam,
         "edge_voice": _edge,
         "edge_locale": _locale,
+        "gnani_code": _GNANI_CODES.get(_key),
         "fish_voice_id": None,
     }
     _ALIASES[_key] = _key
@@ -117,6 +126,7 @@ def get_language(language_key: str) -> dict:
         "sarvam_code": None,
         "edge_voice": None,
         "edge_locale": None,
+        "gnani_code": None,
         "fish_voice_id": None,
     }
 
@@ -130,6 +140,9 @@ def engine_can_speak(engine: str, language_key: str):
         return False, f"voice_engine='edge' has no known voices for '{lang['label']}'. Use voice_engine='fish'."
     if engine == "gtts" and not lang.get("gtts_code"):
         return False, f"voice_engine='gtts' does not support '{lang['label']}'. Use voice_engine='fish' or 'edge'."
+    if engine == "gnani" and not lang.get("gnani_code"):
+        return False, (f"voice_engine='gnani' supports English, Hinglish and 10 Indian languages (Hindi, Telugu, Tamil, "
+                       f"Kannada, Malayalam, Marathi, Punjabi, Bengali, Gujarati), not '{lang['label']}'. Use voice_engine='fish' or 'edge'.")
     if engine in ("sarvam", "echofy") and not lang.get("sarvam_code"):
         return False, f"voice_engine='{engine}' only supports Indian languages, not '{lang['label']}'. Use voice_engine='fish' or 'edge'."
     return True, ""

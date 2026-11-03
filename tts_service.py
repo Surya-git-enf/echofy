@@ -4,6 +4,8 @@ Strict routing: whichever engine is requested is the ONLY engine that runs.
 No automatic fallback between engines.
 
 Engines:
+  - "gnani"  -> Gnani Vachana API, model timbre-v3.0 (GNANI_API_KEY required). Indian
+                languages + English/Hinglish, 13 voices, emotions through inline tags
   - "fish"   -> Fish Audio hosted API (paid, FISH_AUDIO_API_KEY required)
   - "echofy" -> your own self-hosted IndicF5 service (free, CPU-runnable,
                 ECHOFY_VOICE_SERVICE_URL required — see echofy-voice/)
@@ -67,6 +69,107 @@ def _resolve_echofy_voice_key(character_profile: str, emotion: str) -> str:
 
 def strip_emotion_tags(text: str) -> str:
     return EMOTION_TAG_PATTERN.sub("", text).strip()
+
+
+# ---------------- Gnani Vachana (strict — no fallback) ----------------
+
+GNANI_URL = "https://api.vachana.ai/api/v1/tts/inference"
+GNANI_MODEL = "timbre-v3.0"  # the only Vachana model with emotion tags and voices that speak every language
+GNANI_MAX_RETRIES = 4
+BRACKET_TAG_PATTERN = re.compile(r"\[([^\]]{1,40})\]")
+GNANI_TAG_PATTERN = re.compile(r"<[a-z ]+>")
+
+# Words Gemini may put in [brackets] -> the audio tags timbre-v3.0 actually understands.
+# Vachana has no "angry" tag; <shouting> is the closest it offers.
+GNANI_TAG_WORDS = {
+    "laugh": "<laugh>", "laughs": "<laugh>", "laughing": "<laugh>", "laughter": "<laugh>",
+    "giggle": "<giggle>", "giggles": "<giggle>", "giggling": "<giggle>",
+    "whisper": "<whispers>", "whispers": "<whispers>", "whispering": "<whispers>",
+    "excited": "<excited>", "excitedly": "<excited>",
+    "shouting": "<shouting>", "shout": "<shouting>", "shouts": "<shouting>", "yelling": "<shouting>",
+    "screaming": "<shouting>", "angry": "<shouting>",
+    "sigh": "<sigh>", "sighs": "<sigh>", "sighing": "<sigh>", "sad": "<sigh>",
+    "crying": "<sniffles>", "sobbing": "<sniffles>", "sniffles": "<sniffles>",
+    "cough": "<coughs>", "coughs": "<coughs>", "yawn": "<yawns>", "yawns": "<yawns>",
+    "exhale": "<exhales>", "exhales": "<exhales>", "pause": "<pauses>", "pauses": "<pauses>",
+    "slow": "<slow>", "slowly": "<slow>", "clears throat": "<clears throat>",
+}
+# Tag added to the start of a line that has none, based on the line's detected emotion.
+GNANI_EMOTION_TAG = {"excited": "<excited>", "angry": "<shouting>", "whisper": "<whispers>", "sad": "<sigh>"}
+GNANI_EMOTION_SPEED = {"angry": 1.10, "excited": 1.08, "sad": 0.90, "calm": 0.95, "serious": 0.95, "whisper": 0.95}
+
+
+def gnani_prepare(text: str, emotion: str = "neutral"):
+    """(text with Vachana audio tags, speed). Pure function."""
+    def to_tag(match):
+        return GNANI_TAG_WORDS.get(match.group(1).strip().lower(), "")
+
+    converted = BRACKET_TAG_PATTERN.sub(to_tag, text)
+    converted = re.sub(r"\s+", " ", converted).strip()
+    emotion = (emotion or "neutral").lower()
+    lead = GNANI_EMOTION_TAG.get(emotion)
+    # Quiet anger stays a spoken line (faster only); anger with "!" gets the shouting tag.
+    if emotion == "angry" and "!" not in converted:
+        lead = None
+    if lead and not GNANI_TAG_PATTERN.search(converted):
+        converted = f"{lead} {converted}"
+    speed = max(0.85, min(1.15, GNANI_EMOTION_SPEED.get(emotion, 1.0)))
+    return converted, speed
+
+
+def generate_speech_gnani(text: str, language_key: str, out_path: str, emotion: str = "neutral", voice: dict = None):
+    api_key = os.getenv("GNANI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "GNANI_API_KEY is not set. voice_engine='gnani' was requested but cannot run without this key."
+        )
+    lang = get_language(language_key)
+    if not lang.get("gnani_code"):
+        raise RuntimeError(f"Gnani does not support '{lang['label']}'.")
+    voice_name = (voice or {}).get("gnani_voice") or "Shubham"
+
+    prepared_text, speed = gnani_prepare(text, emotion)
+    if not GNANI_TAG_PATTERN.sub("", prepared_text).strip():
+        raise RuntimeError("Gnani needs some spoken words in the line, not only audio tags.")
+
+    headers = {"X-API-Key-ID": api_key, "Content-Type": "application/json"}
+    payload = {
+        "text": prepared_text,
+        "model": GNANI_MODEL,
+        "voice": voice_name,
+        "language": lang["gnani_code"],
+        "speed": speed,
+        "audio_config": {"sample_rate": 44100, "num_channels": 1, "container": "mp3", "bitrate": "192k"},
+    }
+
+    last_error = None
+    for attempt in range(1, GNANI_MAX_RETRIES + 1):
+        try:
+            resp = requests.post(GNANI_URL, headers=headers, json=payload, timeout=90)
+        except requests.RequestException as exc:
+            last_error = f"network error: {exc}"
+            time.sleep(2 ** attempt)
+            continue
+
+        if resp.status_code in (401, 403):
+            raise RuntimeError(f"Gnani rejected the request ({resp.status_code}): check GNANI_API_KEY, account status and credits. {resp.text[:300]}")
+        if resp.status_code == 429 or resp.status_code >= 500:
+            # Vachana allows one active request at a time; wait and retry.
+            last_error = f"status {resp.status_code}: {resp.text[:200]}"
+            time.sleep(2 ** attempt)
+            continue
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Gnani TTS failed with status {resp.status_code}: {resp.text[:500]}")
+        if "json" in resp.headers.get("Content-Type", "").lower() or len(resp.content) < 200:
+            last_error = f"unexpected response instead of audio: {resp.text[:200]}"
+            time.sleep(2 ** attempt)
+            continue
+
+        with open(out_path, "wb") as f:
+            f.write(resp.content)
+        return
+
+    raise RuntimeError(f"Gnani TTS failed after {GNANI_MAX_RETRIES} attempts: {last_error}")
 
 
 # ---------------- Fish Audio (strict — no fallback) ----------------
@@ -233,7 +336,9 @@ def generate_speech(text: str, language_key: str, out_path: str, engine: str = "
     if not text or not text.strip():
         return
 
-    if engine == "fish":
+    if engine == "gnani":
+        generate_speech_gnani(text, language_key, out_path, emotion=emotion, voice=voice)
+    elif engine == "fish":
         generate_speech_fish(text, language_key, out_path, character_profile=character_profile, voice=voice)
     elif engine == "echofy":
         generate_speech_echofy(text, language_key, out_path, character_profile=character_profile, emotion=emotion)

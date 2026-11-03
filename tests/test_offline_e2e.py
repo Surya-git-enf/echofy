@@ -41,6 +41,7 @@ import tts_service  # noqa: E402
 import video_service  # noqa: E402
 import voice_casting  # noqa: E402
 
+REAL_GENERATE_SPEECH = tts_service.generate_speech  # before any test swaps in the fake
 INPUT = os.path.join(ROOT, "test", "input", "input.mp4")
 TELUGU = ["ఏంటి ఇది?", "నేను చెప్తున్నా కదా, వినరా!", "అబ్బా, ఇంకెంత సేపు రా బాబు", "సరే సరే, పద వెళ్దాం",
           "ఇక్కడ ఎవరో ఉన్నారు, జాగ్రత్త", "హహ్హా, నేను చూసుకుంటా లే", "ఏమైనా సరే, ఆగను నేను", "చాలు చాలు, అర్థమైంది"]
@@ -143,6 +144,91 @@ def test_normaliser_cleans_gemini_output():
     out = gemini_service.normalise_script(raw, 10.0)
     assert len(out["segments"]) == 1 and out["segments"][0]["end"] > out["segments"][0]["start"]
     assert out["characters"][0]["gender"] == "female" and out["characters"][0]["archetype"] == "default"
+
+
+class FakeResponse:
+    def __init__(self, status=200, content=b"", content_type="audio/mpeg", text=""):
+        self.status_code, self.content, self.text = status, content, text
+        self.headers = {"Content-Type": content_type}
+
+
+def _tone_mp3(path):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=300:d=0.7,volume=0.4",
+                    "-c:a", "libmp3lame", path], check=True)
+    return open(path, "rb").read()
+
+
+def test_gnani_request_shape_retry_and_errors():
+    work = tempfile.mkdtemp()
+    try:
+        audio = _tone_mp3(os.path.join(work, "t.mp3"))
+        calls = []
+        replies = [FakeResponse(429, text="busy"), FakeResponse(200, audio)]
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            calls.append((url, headers, json))
+            return replies.pop(0)
+
+        os.environ["GNANI_API_KEY"] = "test-key"
+        tts_service.requests.post, tts_service.time.sleep = fake_post, lambda s: None
+        out = os.path.join(work, "out.mp3")
+        REAL_GENERATE_SPEECH("[angry] Get out of here!", "telugu", out, engine="gnani", emotion="angry",
+                             voice={"gnani_voice": "Harshad"})
+        url, headers, payload = calls[-1]
+        assert url == "https://api.vachana.ai/api/v1/tts/inference" and len(calls) == 2  # 429 then success
+        assert headers["X-API-Key-ID"] == "test-key"
+        assert payload["model"] == "timbre-v3.0" and payload["voice"] == "Harshad" and payload["language"] == "te-IN"
+        assert payload["text"] == "<shouting> Get out of here!" and payload["speed"] == 1.1
+        assert payload["audio_config"]["container"] == "mp3" and os.path.getsize(out) == len(audio)
+
+        tts_service.requests.post = lambda *a, **k: FakeResponse(403, text="no credits")
+        try:
+            REAL_GENERATE_SPEECH("hello", "telugu", out, engine="gnani", voice={"gnani_voice": "Harshad"})
+            raise AssertionError("403 should raise")
+        except RuntimeError as exc:
+            assert "GNANI_API_KEY" in str(exc)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_gnani_five_characters_through_the_real_engine_code():
+    """Real pipeline + real gnani code; only the HTTP call is replaced. Checks what Vachana would receive."""
+    work, audio_dir = tempfile.mkdtemp(), tempfile.mkdtemp()
+    try:
+        audio = _tone_mp3(os.path.join(audio_dir, "t.mp3"))
+        sent = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            sent.append(json)
+            return FakeResponse(200, audio)
+
+        os.environ["GNANI_API_KEY"] = "test-key"
+        tts_service.requests.post = fake_post
+        tts_service.generate_speech = REAL_GENERATE_SPEECH
+        script = fake_script(10.12)
+        script["segments"][1]["emotion"] = "angry"
+        script["segments"][3]["emotion"] = "excited"
+        gemini_service.transcribe_and_translate = lambda path, label, total=0.0: script
+        result = pipeline.process_video(INPUT, "telugu", "gnani", work)
+
+        voices_by_speaker = {}
+        for seg, payload in zip(result["segments"], sent):
+            voices_by_speaker.setdefault(seg["speaker"], set()).add(payload["voice"])
+        assert len(voices_by_speaker) == 5 and all(len(v) == 1 for v in voices_by_speaker.values()), voices_by_speaker
+        assert len({next(iter(v)) for v in voices_by_speaker.values()}) == 5  # five different Gnani voices
+        assert all(p["language"] == "te-IN" and p["model"] == "timbre-v3.0" for p in sent)
+        assert sent[1]["text"].startswith("<shouting>") and sent[3]["text"].startswith("<excited>")
+        assert all(os.path.exists(result[k]) for k in ("output_path", "voice_track_path", "background_applied_path"))
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(audio_dir, ignore_errors=True)
+
+
+def test_gnani_language_limits():
+    from languages import engine_can_speak
+    assert engine_can_speak("gnani", "telugu")[0] and engine_can_speak("gnani", "hinglish")[0]
+    ok, reason = engine_can_speak("gnani", "french")
+    assert not ok and "fish" in reason
 
 
 if __name__ == "__main__":

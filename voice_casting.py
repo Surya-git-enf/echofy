@@ -13,9 +13,13 @@ Spec keys:
   edge_voice        Edge neural voice name (engine 'edge')
   edge_pitch_hz     Edge pitch offset in Hz
   edge_rate_pct     Edge speaking-rate offset in percent
+  gnani_voice       Gnani Vachana timbre-v3.0 voice name (engine 'gnani')
   fish_reference_id Fish Audio voice id (engine 'fish'), may be None
   pitch_semitones   post-processing pitch shift applied in video_service
                     (0 when the engine already varies the voice natively)
+
+Gnani voices come from the fixed timbre-v3.0 catalog below (13 voices, each speaks every
+supported language); the persona labels are Gnani's own.
 
 Fish Audio voices are account-specific. Provide them with:
   FISH_VOICE_POOL='{"male": ["id1", "id2"], "female": ["id3", "id4"]}'
@@ -30,6 +34,21 @@ AGE_PITCH_HZ = {"child": (40, 6), "teen": (20, 3), "young": (8, 0), "adult": (0,
 AGE_SEMITONES = {"child": 4.0, "teen": 2.0, "young": 0.0, "adult": 0.0, "elder": -2.0}
 GENDER_SEMITONES = {"male": -2.0, "female": 2.0, "neutral": 0.0}
 EDGE_VARIANTS = [(0, 0), (-16, -4), (16, 3), (-28, -7), (28, 6), (-40, -10), (40, 9)]
+
+# Gnani timbre-v3.0 catalog (docs.gnani.ai/api/TTS/available-voices), grouped by Gnani's persona label.
+GNANI_V3_VOICES = {
+    "male": {
+        "professional": ["Avinash", "Harshad", "Prakash"],
+        "energetic": ["Shubham"],
+        "conversational": ["Devansh"],
+        "warm": ["Yashraj"],
+    },
+    "female": {
+        "authoritative": ["Riyaa"],
+        "energetic": ["Lakshmi", "Vasudha"],
+        "warm": ["Chetana", "Kalpana", "Shivani", "Tarika"],
+    },
+}
 
 _edge_voice_cache = None
 
@@ -97,6 +116,23 @@ def _fish_archetype_voice(archetype: str):
     return os.getenv(f"FISH_VOICE_{(archetype or 'default').upper()}") or None
 
 
+def gnani_candidates(gender: str, age: str, archetype: str) -> list:
+    """All Gnani voices of the gender, best persona fit first (the caller takes the first unused one)."""
+    groups = GNANI_V3_VOICES[gender]
+    if archetype in ("anime_villain", "monster_deep", "mature_female") or age == "elder":
+        wanted = ["authoritative", "professional", "warm", "conversational", "energetic"]
+    elif archetype in ("cool_hero", "young_boy") or age in ("child", "teen", "young"):
+        wanted = ["energetic", "conversational", "warm", "authoritative", "professional"]
+    else:
+        wanted = ["conversational", "warm", "professional", "authoritative", "energetic"]
+    ordered = []
+    for persona in wanted:
+        for voice in groups.get(persona, []):
+            if voice not in ordered:
+                ordered.append(voice)
+    return ordered
+
+
 def _least_used(candidates: list, usage: dict):
     return min(candidates, key=lambda c: (usage.get(c, 0), candidates.index(c)))
 
@@ -127,7 +163,7 @@ def build_cast(characters: list, engine: str, language_key: str, edge_pool: dict
 
         spec = {"speaker": speaker, "gender": gender, "age_group": age,
                 "edge_voice": None, "edge_pitch_hz": 0, "edge_rate_pct": 0,
-                "fish_reference_id": None, "pitch_semitones": 0.0}
+                "fish_reference_id": None, "gnani_voice": None, "pitch_semitones": 0.0}
 
         if engine == "edge":
             candidates = pool.get(gender_pick) or pool.get("female" if gender_pick == "male" else "male") or []
@@ -148,7 +184,10 @@ def build_cast(characters: list, engine: str, language_key: str, edge_pool: dict
 
         else:
             ref_id = None
-            if engine == "fish":
+            if engine == "gnani":
+                ref_id = _least_used(gnani_candidates(gender_pick, age, character.get("archetype") or "default"), usage)
+                usage[ref_id] = usage.get(ref_id, 0) + 1
+            elif engine == "fish":
                 ref_id = _fish_archetype_voice(character.get("archetype"))
                 candidates = [v for v in (pool.get(gender_pick) or []) if v]
                 if not ref_id and candidates:
@@ -158,10 +197,11 @@ def build_cast(characters: list, engine: str, language_key: str, edge_pool: dict
             if ref_id and usage[ref_id] == 1:
                 semitones = 0.0  # a real, separately configured voice needs no shift on first use
             else:
-                # Shared or default voice: separate characters with a pitch shift.
-                base = GENDER_SEMITONES[gender_pick] + AGE_SEMITONES[age]
+                # A real voice used again, or one shared default voice: separate characters with a pitch shift.
                 nth = (usage[ref_id] - 1) if ref_id else index
-                semitones = base + (1.5 * ((nth + 1) // 2)) * (1 if nth % 2 else -1)
+                base = 0.0 if ref_id else GENDER_SEMITONES[gender_pick] + AGE_SEMITONES[age]
+                step = 2.5 if ref_id else 1.5  # a reused real voice needs a clearly audible shift
+                semitones = base + (step * ((nth + 1) // 2)) * (1 if nth % 2 else -1)
                 semitones = max(-7.0, min(7.0, semitones))
             voice_id = f"{engine}:{ref_id or 'default'}:{semitones:+.1f}st"
             step = 0
@@ -171,7 +211,9 @@ def build_cast(characters: list, engine: str, language_key: str, edge_pool: dict
                 voice_id = f"{engine}:{ref_id or 'default'}:{semitones:+.1f}st"
                 if step > 40:
                     break
-            spec.update(fish_reference_id=ref_id, pitch_semitones=round(semitones, 2), voice_id=voice_id)
+            spec.update(fish_reference_id=ref_id if engine == "fish" else None,
+                        gnani_voice=ref_id if engine == "gnani" else None,
+                        pitch_semitones=round(semitones, 2), voice_id=voice_id)
 
         used_ids.add(spec["voice_id"])
         cast[speaker] = spec

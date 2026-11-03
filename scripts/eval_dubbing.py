@@ -128,7 +128,8 @@ def judge_dialogue(run: dict, min_score: float):
         "- slang_register: does slang, humour and attitude match the original, using real local idiom and normal code-mixing?\n"
         "- character_voice: does each character have a consistent, distinct way of speaking that fits their age and gender?\n"
         "- scene_fit: does the dialogue follow the scene's drama and fit the time slots (no rambling, no missing meaning)?\n"
-        'Return JSON only: {"naturalness":n,"slang_register":n,"character_voice":n,"scene_fit":n,"worst_line":"quote the weakest line","fix":"one sentence on how to improve it"}'
+        "- emotion_match: does each line's labelled emotion (shown in brackets after the speaker) fit what is being said, and is angry/excited/sad/whispered delivery marked where the scene needs it?\n"
+        'Return JSON only: {"naturalness":n,"slang_register":n,"character_voice":n,"scene_fit":n,"emotion_match":n,"worst_line":"quote the weakest line","fix":"one sentence on how to improve it"}'
     )
     try:
         client = genai.Client(api_key=api_key)
@@ -137,7 +138,7 @@ def judge_dialogue(run: dict, min_score: float):
             config=types.GenerateContentConfig(response_mime_type="application/json"),
         )
         scores = json.loads(re.sub(r"^```(json)?|```$", "", response.text.strip(), flags=re.MULTILINE).strip())
-        keys = ["naturalness", "slang_register", "character_voice", "scene_fit"]
+        keys = ["naturalness", "slang_register", "character_voice", "scene_fit", "emotion_match"]
         values = {k: float(scores[k]) for k in keys}
     except Exception as exc:  # noqa: BLE001
         return None, f"judge call failed: {exc}"

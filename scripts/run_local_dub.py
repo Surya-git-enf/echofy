@@ -4,10 +4,10 @@ Run the real dubbing pipeline locally on every video in test/input/ and score th
 
     python scripts/run_local_dub.py                          # all inputs, default languages
     python scripts/run_local_dub.py --languages telugu hindi spanish
-    python scripts/run_local_dub.py --inputs test/input/input.mp4 --engine fish
+    python scripts/run_local_dub.py --inputs test/input/input.mp4 --engine gnani
 
 Needs the same environment variables as the server (GEMINI_API_KEY, SUPABASE_*, STEMSPLIT_API_KEY,
-and FISH_AUDIO_API_KEY for the fish engine). Stem separation results are cached in .cache/stems so
+and GNANI_API_KEY for the default gnani engine, FISH_AUDIO_API_KEY for fish). Stem separation results are cached in .cache/stems so
 re-running does not spend stemsplit.io minutes again. Results go to test/outputs/<input>__<language>/.
 
 Optional per-input settings: put <input name>.json next to the video, e.g.
@@ -47,7 +47,7 @@ def main():
 
     from dotenv import load_dotenv
     load_dotenv(os.path.join(ROOT, ".env"))
-    engine = args.engine or ("fish" if os.getenv("FISH_AUDIO_API_KEY") else "edge")
+    engine = args.engine or ("gnani" if os.getenv("GNANI_API_KEY") else "fish" if os.getenv("FISH_AUDIO_API_KEY") else "edge")
 
     import pipeline
     import eval_dubbing

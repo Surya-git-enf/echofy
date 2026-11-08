@@ -1,0 +1,28 @@
+"use client";
+import { useCallback, useState } from "react";
+import { welcomeSeen } from "@/lib/credits";
+import Navbar from "./Navbar";
+import HeroCanvas from "./HeroCanvas";
+import ScratchCard from "./ScratchCard";
+import UploadStudio from "./UploadStudio";
+import StudioCards from "./StudioCards";
+import SpiralShowcase from "./SpiralShowcase";
+import Footer from "./Footer";
+
+export default function Experience() {
+  const [showScratch, setShowScratch] = useState(false);
+  // Fires when the hero reaches its last frame; the card only ever appears once per browser.
+  const onHeroEnd = useCallback(() => { if (!welcomeSeen()) setShowScratch(true); }, []);
+
+  return (
+    <main id="top">
+      <Navbar />
+      <HeroCanvas onEnd={onHeroEnd} />
+      <UploadStudio />
+      <StudioCards />
+      <SpiralShowcase />
+      <Footer />
+      {showScratch && <ScratchCard onClose={() => setShowScratch(false)} />}
+    </main>
+  );
+}

@@ -90,7 +90,7 @@ button, select { font: inherit; }
 .eql-bars { position: relative; display: flex; align-items: center; gap: 6px; height: 110px; }
 .eql-pill { width: 6px; height: 100%; border-radius: 3px; background: #000; opacity: 0.5; transform: scaleY(var(--lo)); animation: eq 1.1s ease-in-out infinite alternate; }
 .eql-pill.is-hidden { visibility: hidden; }
-.eql-mark { position: absolute; left: 50%; top: 50%; width: 74px; height: 74px; transform: translate(-50%, -50%); }
+.eql-mark { position: absolute; left: 50%; top: 50%; width: 106px; height: 106px; transform: translate(-50%, -50%); }
 .eql-phrase { margin: 0; min-height: 1.6em; color: #000; font-size: 1.08rem; text-align: center; animation: phrase 0.6s ease both; }
 @keyframes eq { from { transform: scaleY(var(--lo)); } to { transform: scaleY(var(--hi)); } }
 @keyframes phrase { from { opacity: 0; } to { opacity: 1; } }

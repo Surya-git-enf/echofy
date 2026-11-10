@@ -5,6 +5,7 @@ import traceback
 import uuid
 
 import gemini_service
+import stt_service
 import supabase_service
 import tts_service
 import video_service
@@ -59,9 +60,18 @@ def process_video(local_video_path: str, target_language: str, voice_engine: str
     transcribe_input = os.path.join(work_dir, "transcribe_input.wav")
     video_service.extract_audio(vocals_path or source_audio, transcribe_input)
 
-    progress("Transcribing & adapting dialogue", 35)
     lang = get_language(target_language)
-    script = gemini_service.transcribe_and_translate(transcribe_input, lang["label"], total_duration)
+    if os.getenv("TRANSCRIBE_ENGINE", "gnani").lower() == "gemini":
+        # Escape hatch: Gemini listens and transcribes by itself.
+        progress("Transcribing & adapting dialogue", 35)
+        script = gemini_service.transcribe_and_translate(transcribe_input, lang["label"], total_duration)
+    else:
+        progress("Transcribing with Gnani", 30)
+        source_lines = stt_service.transcribe_audio(transcribe_input, total_duration, work_dir)
+        if not source_lines:
+            raise RuntimeError("Gnani found no spoken dialogue in this video, so there is nothing to dub.")
+        progress("Writing the dub", 38)
+        script = gemini_service.adapt_dialogue(source_lines, transcribe_input, lang["label"], total_duration)
     segments = script["segments"]
     if not segments:
         raise RuntimeError("No spoken dialogue was found in this video, so there is nothing to dub.")

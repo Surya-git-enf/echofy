@@ -37,12 +37,15 @@ os.environ.pop("STEMSPLIT_API_KEY", None)  # forces the fallback path
 import eval_dubbing  # noqa: E402
 import gemini_service  # noqa: E402
 import pipeline  # noqa: E402
+import stt_service  # noqa: E402
 import tts_service  # noqa: E402
 import video_service  # noqa: E402
 import voice_casting  # noqa: E402
 
 REAL_GENERATE_SPEECH = tts_service.generate_speech  # before any test swaps in the fake
 REAL_TRANSCRIBE = gemini_service.transcribe_and_translate
+REAL_TRANSCRIBE_AUDIO = stt_service.transcribe_audio
+REAL_ADAPT = gemini_service.adapt_dialogue
 INPUT = os.path.join(ROOT, "test", "input", "input.mp4")
 TELUGU = ["ఏంటి ఇది?", "నేను చెప్తున్నా కదా, వినరా!", "అబ్బా, ఇంకెంత సేపు రా బాబు", "సరే సరే, పద వెళ్దాం",
           "ఇక్కడ ఎవరో ఉన్నారు, జాగ్రత్త", "హహ్హా, నేను చూసుకుంటా లే", "ఏమైనా సరే, ఆగను నేను", "చాలు చాలు, అర్థమైంది"]
@@ -75,6 +78,7 @@ def fake_tts(text, language_key, out_path, engine="echofy", character_profile="d
 
 
 def run_case(engine, work, n_speakers=5):
+    os.environ["TRANSCRIBE_ENGINE"] = "gemini"
     gemini_service.transcribe_and_translate = lambda path, label, total=0.0: fake_script(total, n_speakers)
     tts_service.generate_speech = fake_tts
     voice_casting.edge_voice_pool = lambda lang: {"male": ["te-IN-MohanNeural"], "female": ["te-IN-ShrutiNeural"]}
@@ -209,6 +213,7 @@ def test_gnani_five_characters_through_the_real_engine_code():
         script = fake_script(10.12)
         script["segments"][1]["emotion"] = "angry"
         script["segments"][3]["emotion"] = "excited"
+        os.environ["TRANSCRIBE_ENGINE"] = "gemini"
         gemini_service.transcribe_and_translate = lambda path, label, total=0.0: script
         result = pipeline.process_video(INPUT, "telugu", "gnani", work)
 
@@ -264,6 +269,213 @@ def test_gemini_client_uses_v1beta_for_system_instruction():
     assert seen["http_options"] == {"api_version": "v1beta"}
     assert "system_instruction" in seen["config"]
     assert out["segments"][0]["translated_text"] == "hi"
+
+
+# ---------------------------------------------------------------------------------------------
+# Gnani speech-to-text and the Gemini dialogue writer
+# ---------------------------------------------------------------------------------------------
+def _gated_audio(path, bursts, total):
+    """A 300 Hz tone that is audible only inside the given (start, end) bursts."""
+    gate = "+".join(f"between(t,{a},{b})" for a, b in bursts)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"sine=f=300:d={total}",
+                    "-af", f"volume='if({gate},0.5,0)':eval=frame", "-ar", "16000", "-ac", "1", path], check=True)
+    return path
+
+
+class FakeSTTResponse:
+    def __init__(self, status=200, transcript="", text=""):
+        self.status_code, self._transcript, self.text = status, transcript, text
+
+    def json(self):
+        return {"success": True, "transcript": self._transcript, "model": "prisma-v3.0"}
+
+
+def test_stt_finds_spoken_stretches_and_splits_long_ones():
+    work = tempfile.mkdtemp()
+    try:
+        # two short lines, then 14 s of speech with a clear pause at 12 s that must be used to split it
+        bursts = [(0.5, 2.5), (3.5, 5.0), (6.0, 12.0), (12.5, 20.0)]
+        audio = _gated_audio(os.path.join(work, "a.wav"), bursts, 22)
+        found = stt_service.find_speech_intervals(audio, 22.0)
+        assert len(found) == 4, found
+        for (a, b), (ea, eb) in zip(found, bursts):
+            assert abs(a - ea) < 0.2 and abs(b - eb) < 0.2, (found, bursts)
+        # unbroken speech longer than the API limit is hard-split under the 25 s cap
+        long_audio = _gated_audio(os.path.join(work, "b.wav"), [(0.5, 39.5)], 40)
+        pieces = stt_service.find_speech_intervals(long_audio, 40.0)
+        assert len(pieces) == 2 and all(b - a <= stt_service.MAX_CHUNK_SECONDS for a, b in pieces), pieces
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_stt_request_shape_lines_and_timing():
+    work = tempfile.mkdtemp()
+    try:
+        audio = _gated_audio(os.path.join(work, "a.wav"), [(0.5, 2.0), (3.0, 4.5), (5.5, 7.0)], 8)
+        sent, answers = [], iter(["hello there", "", "see you later"])  # the middle stretch is music, not speech
+
+        def fake_post(url, headers=None, data=None, files=None, timeout=None):
+            sent.append({"url": url, "headers": headers, "data": data, "file": files["audio_file"].read(64)})
+            return FakeSTTResponse(200, next(answers))
+
+        os.environ["GNANI_API_KEY"] = "test-key"
+        os.environ.pop("GNANI_STT_LANGUAGE", None)
+        stt_service.requests.post = fake_post
+        stt_service.transcribe_audio = REAL_TRANSCRIBE_AUDIO
+        lines = stt_service.transcribe_audio(audio, 8.0, work)
+
+        assert [l["text"] for l in lines] == ["hello there", "see you later"]
+        assert [l["id"] for l in lines] == [0, 1]  # ids are re-numbered after silent chunks are dropped
+        assert abs(lines[0]["start"] - 0.5) < 0.2 and abs(lines[1]["end"] - 7.0) < 0.2
+        assert all(r["url"] == "https://api.vachana.ai/stt/v3" for r in sent)
+        assert all(r["headers"] == {"X-API-Key-ID": "test-key"} for r in sent)
+        assert all(r["data"] == {"language_code": "en-IN,hi-IN,te-IN,ta-IN", "model": "prisma-v3.0"} for r in sent)
+        assert all(r["file"][:4] == b"RIFF" for r in sent)  # a WAV was uploaded
+        os.environ["GNANI_STT_LANGUAGE"] = "te-IN"
+        sent.clear(); answers = iter(["a", "b", "c"])
+        stt_service.transcribe_audio(audio, 8.0, work)
+        assert sent[0]["data"]["language_code"] == "te-IN"
+    finally:
+        os.environ.pop("GNANI_STT_LANGUAGE", None)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def test_stt_retries_and_errors():
+    work = tempfile.mkdtemp()
+    try:
+        wav = _gated_audio(os.path.join(work, "a.wav"), [(0.2, 1.5)], 2)
+        stt_service.time.sleep = lambda s: None
+        os.environ["GNANI_API_KEY"] = "test-key"
+        replies = iter([FakeSTTResponse(500, text="boom"), FakeSTTResponse(429, text="slow down"), FakeSTTResponse(200, "ok")])
+        stt_service.requests.post = lambda *a, **k: next(replies)
+        assert stt_service.transcribe_chunk(wav, "en-IN") == "ok"
+
+        stt_service.requests.post = lambda *a, **k: FakeSTTResponse(401, text="bad key")
+        try:
+            stt_service.transcribe_chunk(wav, "en-IN")
+            raise AssertionError("401 should raise")
+        except RuntimeError as exc:
+            assert "GNANI_API_KEY" in str(exc)
+
+        stt_service.requests.post = lambda *a, **k: FakeSTTResponse(400, text="UNSUPPORTED_LANGUAGE")
+        try:
+            stt_service.transcribe_chunk(wav, "xx-XX")
+            raise AssertionError("400 should raise without retrying")
+        except RuntimeError as exc:
+            assert "400" in str(exc)
+
+        os.environ.pop("GNANI_API_KEY")
+        try:
+            stt_service.transcribe_chunk(wav, "en-IN")
+            raise AssertionError("missing key should raise")
+        except RuntimeError as exc:
+            assert "GNANI_API_KEY is not set" in str(exc)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+SOURCE_LINES = [
+    {"id": 0, "start": 0.5, "end": 2.0, "text": "Hi, is this seat taken?"},
+    {"id": 1, "start": 2.4, "end": 4.0, "text": "No, please, sit."},
+    {"id": 2, "start": 4.5, "end": 6.0, "text": "Thanks. I'm Maya."},
+]
+
+
+def test_dialogue_is_joined_to_the_transcript_by_id():
+    data = {"detected_source_language": "English", "scene_summary": "meeting",
+            "characters": [{"id": "speaker_1", "gender": "female"}, {"id": "speaker_2", "gender": "male"}],
+            "lines": [  # out of order, one corrected, one with an unknown speaker id
+                {"id": 2, "speaker": "speaker_1", "emotion": "calm", "text": "థ్యాంక్స్, నేను మాయ"},
+                {"id": 0, "speaker": "speaker_1", "emotion": "excited", "corrected_source": "Hi, is this seat free?", "text": "హాయ్, ఈ సీట్ ఖాళీయేనా?"},
+                {"id": 1, "speaker": "speaker_9", "emotion": "bogus", "text": "లేదు లేదు, కూర్చో"},
+            ]}
+    script = gemini_service.build_script_from_lines(SOURCE_LINES, data, 7.0)
+    segs = script["segments"]
+    assert [s["start"] for s in segs] == [0.5, 2.4, 4.5]  # timing is Gnani's, never Gemini's
+    assert segs[0]["original_text"] == "Hi, is this seat free?" and segs[1]["original_text"] == "No, please, sit."
+    assert segs[1]["emotion"] == "neutral" and {c["id"] for c in script["characters"]} >= {"speaker_1", "speaker_2", "speaker_9"}
+
+    half = {"lines": [{"id": 0, "speaker": "speaker_1", "text": "ఒకటి"}]}
+    try:
+        gemini_service.build_script_from_lines(SOURCE_LINES, half, 7.0)
+        raise AssertionError("too many missing lines should raise")
+    except RuntimeError as exc:
+        assert "1 of 3" in str(exc)
+
+
+def test_adapt_dialogue_sends_the_transcript_and_audio_to_gemini():
+    seen = {}
+
+    class FakeFiles:
+        def upload(self, file):
+            seen["audio"] = file
+            return "uploaded"
+
+    class FakeModels:
+        def generate_content(self, model, contents, config):
+            seen["contents"], seen["config"] = contents, config
+            return types.SimpleNamespace(text=json.dumps({"lines": [
+                {"id": i, "speaker": "speaker_1", "emotion": "neutral", "text": f"line {i}"} for i in range(3)]}))
+
+    class FakeClient:
+        def __init__(self, api_key=None, http_options=None):
+            self.files, self.models = FakeFiles(), FakeModels()
+
+    genai, gtypes = sys.modules["google.genai"], sys.modules["google.genai.types"]
+    saved = (genai.Client, getattr(gtypes, "HttpOptions", None), getattr(gtypes, "GenerateContentConfig", None))
+    genai.Client = FakeClient
+    gtypes.HttpOptions = lambda **kw: kw
+    gtypes.GenerateContentConfig = lambda **kw: kw
+    os.environ["GEMINI_API_KEY"] = "test-key"
+    try:
+        out = REAL_ADAPT(SOURCE_LINES, "a.wav", "Telugu", 7.0)
+    finally:
+        genai.Client, gtypes.HttpOptions, gtypes.GenerateContentConfig = saved
+    prompt = seen["contents"][0]
+    assert 'id=0  1.5s  max 4 words  "Hi, is this seat taken?"' in prompt
+    assert "Telugu" in prompt and "{" not in prompt.split("OUTPUT:")[0]  # no unfilled template fields
+    assert seen["contents"][1] == "uploaded" and seen["audio"] == "a.wav"
+    assert seen["config"]["system_instruction"] == gemini_service.DIALOGUE_SYSTEM_INSTRUCTION
+    assert [s["translated_text"] for s in out["segments"]] == ["line 0", "line 1", "line 2"]
+
+
+def test_pipeline_uses_gnani_transcription_by_default():
+    work = tempfile.mkdtemp()
+    try:
+        os.environ.pop("TRANSCRIBE_ENGINE", None)
+        lines = [{"id": i, "start": 0.4 + i * 1.15, "end": 1.4 + i * 1.15, "text": f"source {i}"} for i in range(8)]
+        calls = {}
+
+        def fake_stt(path, total, work_dir, **kw):
+            calls["stt"] = total
+            return lines
+
+        def fake_adapt(source_lines, path, label, total):
+            calls["adapt"] = (len(source_lines), label)
+            return gemini_service.build_script_from_lines(source_lines, {
+                "characters": CHARACTERS,
+                "lines": [{"id": l["id"], "speaker": CHARACTERS[l["id"] % 5]["id"], "emotion": "neutral", "text": TELUGU[l["id"]]}
+                          for l in source_lines]}, total)
+
+        stt_service.transcribe_audio = fake_stt
+        gemini_service.adapt_dialogue = fake_adapt
+        gemini_service.transcribe_and_translate = lambda *a, **k: (_ for _ in ()).throw(AssertionError("Gemini must not transcribe"))
+        tts_service.generate_speech = fake_tts
+        voice_casting.edge_voice_pool = lambda lang: {"male": ["te-IN-MohanNeural"], "female": ["te-IN-ShrutiNeural"]}
+        result = pipeline.process_video(INPUT, "telugu", "edge", work)
+        assert calls["adapt"] == (8, "Telugu") and calls["stt"] > 0
+        assert [round(s["start"], 2) for s in result["segments"]] == [round(l["start"], 2) for l in lines]
+        assert len({s["speaker"] for s in result["segments"]}) == 5
+
+        # a video with no recognised speech stops with a clear message instead of dubbing silence
+        stt_service.transcribe_audio = lambda *a, **k: []
+        try:
+            pipeline.process_video(INPUT, "telugu", "edge", tempfile.mkdtemp())
+            raise AssertionError("no speech should raise")
+        except RuntimeError as exc:
+            assert "no spoken dialogue" in str(exc)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":

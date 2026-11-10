@@ -121,9 +121,15 @@ There is **no automatic fallback to another engine**. If you ask for `gnani`, yo
 
 The returned 44.1 kHz mp3 is trimmed of leading and trailing silence, sped up (never beyond 1.36×) only if it is longer than its time slot, converted to 44.1 kHz stereo, levelled to −19 LUFS, mixed over the original background with sidechain ducking, and loudness-normalised. See [video_service.py](video_service.py).
 
-### Where Gnani is not used yet
+### Gnani speech-to-text
 
-Transcription and dialogue adaptation are done by **Gemini 2.5 Flash**, which listens to the separated vocals and returns the script, characters and emotions in one pass. Gnani speech-to-text is not part of the pipeline today. It is a natural next step, and the engine boundary in [`tts_service.py`](tts_service.py) keeps that change local.
+Transcription uses Gnani **`prisma-v3.0`** through `POST https://api.vachana.ai/stt/v3` ([`stt_service.py`](stt_service.py)). The synchronous endpoint accepts at most 30 seconds of audio and returns text only, with no timestamps and no speaker labels, so Echofy works around that:
+
+1. ffmpeg silence detection finds the spoken stretches of the separated vocals. Stretches over 12 seconds are split again at their pauses with looser settings, and nothing is sent that is longer than 25 seconds.
+2. Each stretch goes to Gnani as a 16 kHz mono WAV, one request at a time. The stretch's own start and end become the line's timing. Stretches Gnani hears no speech in are dropped.
+3. Language is `en-IN,hi-IN,te-IN,ta-IN` by default (prisma-v3.0 takes up to four codes). Set `GNANI_STT_LANGUAGE` to override, for example `te-IN`.
+
+Gemini 2.5 Flash then receives the timed lines plus the audio. It decides who is speaking and in which emotion, and writes the adapted dialogue. It returns exactly one line per source id, and timing and source text are always taken from Gnani's transcript, never from Gemini. Set `TRANSCRIBE_ENGINE=gemini` to let Gemini transcribe by itself instead.
 
 ### Tested
 
@@ -137,7 +143,8 @@ Transcription and dialogue adaptation are done by **Gemini 2.5 Flash**, which li
 flowchart LR
     A[Upload video] --> B[Extract audio]
     B --> C[Separate vocals<br/>from music]
-    C --> D[Gemini 2.5 Flash<br/>transcribe + adapt<br/>+ find characters]
+    C --> S[Gnani STT prisma-v3.0<br/>timed transcript]
+    S --> D[Gemini 2.5 Flash<br/>speakers, emotion<br/>+ adapted dialogue]
     D --> E[Cast one voice<br/>per character]
     E --> F[Gnani Vachana<br/>speak each line]
     F --> G[Trim, fit to time slot,<br/>level to -19 LUFS]
@@ -151,7 +158,8 @@ flowchart LR
 | 1–5 % | Starting, downloading the upload from Supabase |
 | 12 % | Extracting audio |
 | 22 % | Separating vocals from music (stemsplit.io, cached by audio hash; FFmpeg fallback if the API fails) |
-| 35 % | Transcribing and adapting dialogue (Gemini) |
+| 30 % | Transcribing with Gnani speech-to-text |
+| 38 % | Writing the dub (Gemini) |
 | 45–70 % | Generating dubbed speech, one Vachana request per line |
 | 75 % | Building the dubbed dialogue track |
 | 82 % | Remixing with the original background (sidechain ducking) |
@@ -208,10 +216,12 @@ Results go to `test/outputs/<input>__<language>/` and are scored by the quality 
 
 | Variable | Needed for | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | always | Transcription, dialogue adaptation, characters, quality judge |
+| `GEMINI_API_KEY` | always | Dialogue adaptation, speakers, emotions, quality judge |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | always | Storage and job state |
 | `STEMSPLIT_API_KEY` | always | Vocal separation (without it the FFmpeg fallback background is used) |
-| `GNANI_API_KEY` | engine `gnani` (default) | Gnani Vachana TTS |
+| `GNANI_API_KEY` | always (speech-to-text) and engine `gnani` (default, TTS) | Gnani Vachana STT and TTS |
+| `GNANI_STT_LANGUAGE` | optional | Source language codes for STT, default `en-IN,hi-IN,te-IN,ta-IN` |
+| `TRANSCRIBE_ENGINE` | optional | `gnani` (default) or `gemini` to let Gemini transcribe |
 | `FISH_AUDIO_API_KEY`, `FISH_VOICE_POOL` | engine `fish` | Any-language TTS; the pool is JSON `{"male": ["id"], "female": ["id"]}` |
 | `SARVAM_API_KEY` | engine `sarvam` | Sarvam TTS |
 | `ECHOFY_VOICE_SERVICE_URL` | engine `echofy` | Self-hosted IndicF5 service |
@@ -325,7 +335,8 @@ python scripts/eval_dubbing.py test/outputs/<input>__<language>
 echofy/
 ├── main.py              FastAPI app and endpoints
 ├── pipeline.py          Orchestrates one dubbing job
-├── gemini_service.py    Transcription, localisation, characters (Gemini 2.5 Flash, v1beta API)
+├── stt_service.py       Gnani speech-to-text: speech chunks, requests, timed lines
+├── gemini_service.py    Dialogue writing, speakers, emotions (Gemini 2.5 Flash, v1beta API)
 ├── tts_service.py       TTS engines; Gnani Vachana lives here
 ├── voice_casting.py     One distinct voice per character
 ├── languages.py         Language table and engine/language checks
@@ -351,7 +362,8 @@ echofy/
 
 - Uploads are capped at 800 MB. Slow connections can truncate large uploads, so compress first.
 - Credits are client-side (see above).
-- Transcription is Gemini, not Gnani STT.
+- Gnani's synchronous STT has no speaker labels or timestamps, so speaker identity comes from Gemini listening to the audio. Its batch API can separate two speakers, which is not used.
+- A stretch of speech with no pause longer than 25 seconds is cut at an arbitrary point before transcription.
 - Gnani voices cover English, Hinglish and 10 Indian languages. Other languages need the `fish` or `edge` engine.
 - Automated checks do not replace listening to the result.
 

@@ -68,7 +68,7 @@ export default function PageLoader() {
   if (gone) return null;
   return (
     <div className={`page-loader${finished ? " is-done" : ""}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
-      <EqualizerLoader progress={progress} caption={`Loading ${Math.round(progress * 100)}%`} />
+      <EqualizerLoader progress={progress} />
     </div>
   );
 }

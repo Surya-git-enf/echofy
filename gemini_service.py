@@ -7,6 +7,9 @@ from google import genai
 from google.genai import types
 
 MODEL_NAME = "gemini-2.5-flash"
+# system_instruction ("developer instruction") is only accepted on the v1beta API; the default
+# v1 endpoint rejects it with 400 INVALID_ARGUMENT.
+API_VERSION = "v1beta"
 
 ARCHETYPES = ["anime_villain", "monster_deep", "young_boy", "cool_hero", "mature_female", "default"]
 EMOTIONS = ["neutral", "excited", "sad", "angry", "calm", "whisper", "serious"]
@@ -166,7 +169,7 @@ def transcribe_and_translate(audio_path: str, target_language_label: str, total_
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set.")
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key, http_options=types.HttpOptions(api_version=API_VERSION))
     uploaded_file = client.files.upload(file=audio_path)
 
     prompt = PROMPT_TEMPLATE.format(

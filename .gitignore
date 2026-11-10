@@ -11,3 +11,6 @@ __pycache__/
 *.pyc
 graphify-out/
 .claude/skills/
+
+# keep the template, never the real file
+!.env.example

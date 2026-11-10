@@ -42,6 +42,7 @@ import video_service  # noqa: E402
 import voice_casting  # noqa: E402
 
 REAL_GENERATE_SPEECH = tts_service.generate_speech  # before any test swaps in the fake
+REAL_TRANSCRIBE = gemini_service.transcribe_and_translate
 INPUT = os.path.join(ROOT, "test", "input", "input.mp4")
 TELUGU = ["ఏంటి ఇది?", "నేను చెప్తున్నా కదా, వినరా!", "అబ్బా, ఇంకెంత సేపు రా బాబు", "సరే సరే, పద వెళ్దాం",
           "ఇక్కడ ఎవరో ఉన్నారు, జాగ్రత్త", "హహ్హా, నేను చూసుకుంటా లే", "ఏమైనా సరే, ఆగను నేను", "చాలు చాలు, అర్థమైంది"]
@@ -229,6 +230,40 @@ def test_gnani_language_limits():
     assert engine_can_speak("gnani", "telugu")[0] and engine_can_speak("gnani", "hinglish")[0]
     ok, reason = engine_can_speak("gnani", "french")
     assert not ok and "fish" in reason
+
+
+def test_gemini_client_uses_v1beta_for_system_instruction():
+    """The default v1 API rejects system_instruction with 400 INVALID_ARGUMENT; the client must ask for v1beta."""
+    seen = {}
+
+    class FakeFiles:
+        def upload(self, file):
+            return "uploaded"
+
+    class FakeModels:
+        def generate_content(self, model, contents, config):
+            seen["config"] = config
+            return types.SimpleNamespace(text=json.dumps({"segments": [
+                {"start": 0, "end": 1, "speaker": "speaker_1", "translated_text": "hi"}]}))
+
+    class FakeClient:
+        def __init__(self, api_key=None, http_options=None):
+            seen["http_options"] = http_options
+            self.files, self.models = FakeFiles(), FakeModels()
+
+    genai, gtypes = sys.modules["google.genai"], sys.modules["google.genai.types"]
+    saved = (genai.Client, getattr(gtypes, "HttpOptions", None), getattr(gtypes, "GenerateContentConfig", None))
+    genai.Client = FakeClient
+    gtypes.HttpOptions = lambda **kw: kw
+    gtypes.GenerateContentConfig = lambda **kw: kw
+    os.environ["GEMINI_API_KEY"] = "test-key"
+    try:
+        out = REAL_TRANSCRIBE("a.wav", "Hindi", 5.0)
+    finally:
+        genai.Client, gtypes.HttpOptions, gtypes.GenerateContentConfig = saved
+    assert seen["http_options"] == {"api_version": "v1beta"}
+    assert "system_instruction" in seen["config"]
+    assert out["segments"][0]["translated_text"] == "hi"
 
 
 if __name__ == "__main__":

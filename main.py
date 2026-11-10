@@ -10,7 +10,6 @@ load_dotenv()
 
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 import pipeline
 import supabase_service
@@ -183,7 +182,3 @@ async def unhandled_exception_handler(request, exc):
     traceback.print_exc()
     return JSONResponse(status_code=500, content={"detail": f"Unhandled server error: {exc}"})
 
-
-FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
-if os.path.isdir(FRONTEND_DIR):
-    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

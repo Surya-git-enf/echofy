@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { reportLoad } from "@/lib/loadProgress";
 import { FRAME_COUNT, FRAMES_DIR, MOBILE_FRAMES_DIR, frameSrc } from "@/lib/media";
 
-const FIRST_BATCH = 100;
+const FIRST_BATCH = 50;
 
 /**
  * Loads the hero frames in two stages: the first 100 block the page loader, the rest

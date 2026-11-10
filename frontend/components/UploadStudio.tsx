@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { absoluteUrl, getJob, LANGUAGES, MAX_UPLOAD_BYTES, readDuration, startDub } from "@/lib/api";
 import { costFor, CREDITS_PER_MINUTE, refund, spend, useCredits } from "@/lib/credits";
 import EqualizerLoader from "./EqualizerLoader";
+import LanguageSelect from "./LanguageSelect";
 
 const PHRASES = [
   "Cooking up your dub... 🔥",
@@ -135,16 +136,7 @@ export default function UploadStudio() {
           <div className="ready">
             <p className="file" title={phase.file.name}>{phase.file.name}</p>
             <p className="note">{fmtTime(phase.seconds)} long · {(phase.file.size / 1048576).toFixed(1)} MB</p>
-            <fieldset className="chips">
-              <legend>Dub into</legend>
-              {LANGUAGES.map((l) => (
-                <label key={l.key} className={`chip${l.key === language ? " on" : ""}`}>
-                  <input type="radio" name="language" value={l.key} checked={l.key === language} onChange={() => setLanguage(l.key)} />
-                  <span lang={l.lang}>{l.native}</span>
-                  {l.label !== l.native && <small>{l.label}</small>}
-                </label>
-              ))}
-            </fieldset>
+            <LanguageSelect value={language} onChange={setLanguage} disabled={short} />
             <button type="button" className="btn-grad" onClick={start} disabled={short}>let&rsquo;s dub it</button>
             <p className="note">
               {short

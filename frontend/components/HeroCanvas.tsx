@@ -63,9 +63,9 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
     const trigger = ScrollTrigger.create({
       trigger: sectionRef.current,
       start: "top top",
-      end: "+=400%",
+      end: "+=300%",
       pin: true,
-      scrub: 0.5,
+      scrub: true,
       onUpdate: (self) => {
         const idx = Math.round(self.progress * (FRAME_COUNT - 1));
         if (idx !== frame.current) { frame.current = idx; }

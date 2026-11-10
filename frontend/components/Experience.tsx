@@ -17,15 +17,17 @@ export default function Experience() {
   const onHeroEnd = useCallback(() => { if (!dismissed.current && !welcomeSeen()) setShowScratch(true); }, []);
 
   return (
-    <main id="top">
-      <PageLoader />
-      <Navbar />
-      <HeroCanvas onEnd={onHeroEnd} />
-      <UploadStudio />
-      <StudioCards />
-      <SpiralShowcase />
-      <Footer />
+    <>
+      <main id="top">
+        <PageLoader />
+        <Navbar />
+        <HeroCanvas onEnd={onHeroEnd} />
+        <UploadStudio />
+        <StudioCards />
+        <SpiralShowcase />
+        <Footer />
+      </main>
       {showScratch && <ScratchCard onClose={() => { dismissed.current = true; setShowScratch(false); }} />}
-    </main>
+    </>
   );
 }

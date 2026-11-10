@@ -49,7 +49,10 @@ export default function PageLoader() {
     return () => window.clearTimeout(t);
   }, []);
 
-  const finished = progress >= 0.999 || leaving;
+  // Frames (70%) + assets (20%) + videos (10%) = 1.0
+  // But frames reaches 1.0 after first batch (30 frames)
+  // So we only need ~0.95 to be safe (allows small delays in assets/videos)
+  const finished = progress >= 0.95 || leaving;
 
   useEffect(() => {
     document.documentElement.style.overflow = gone ? "" : "hidden";

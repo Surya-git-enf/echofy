@@ -16,18 +16,12 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
   const taglineRef = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
   const dirty = useRef(true);
-  const { nearest, loaded, allLoaded } = useImageSequence();
+  const { nearest, loaded } = useImageSequence();
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
-  const [ready, setReady] = useState(false);
-
-  // Wait for all frames to be loaded before enabling scroll scrub
-  useEffect(() => {
-    if (allLoaded) setReady(true);
-  }, [allLoaded]);
 
   useEffect(() => {
-    if (!loaded || !ready) return;
+    if (!loaded) return;
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
     let raf = 0;
@@ -151,7 +145,7 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       cancelAnimationFrame(raf);
       trigger.kill();
     };
-  }, [loaded, ready, nearest]);
+  }, [loaded, nearest]);
 
   return (
     <div ref={sectionRef} className="hero">

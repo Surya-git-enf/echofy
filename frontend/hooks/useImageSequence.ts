@@ -3,19 +3,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { reportLoad } from "@/lib/loadProgress";
 import { FRAME_COUNT, FRAMES_DIR, MOBILE_FRAMES_DIR, frameSrc } from "@/lib/media";
 
-const FIRST_BATCH = 30; // Reduced for faster initial load
+const FIRST_BATCH = 30;
 const MOBILE_FIRST_BATCH = 20;
 
 /**
- * Loads hero frames in two stages with mobile/desktop awareness.
- * Reports progress to PageLoader for unified loading UX.
+ * Loads hero frames in two stages:
+ * - Stage 1 (priority): first 30/20 frames — blocks PageLoader, reports "frames" progress 0→1
+ * - Stage 2 (background): remaining frames — loads silently, does NOT block PageLoader
  * `nearest(i)` returns closest loaded frame at/before i — no blank canvas on fast scroll.
  */
 export function useImageSequence() {
   const images = useRef<(HTMLImageElement | null)[]>(new Array(FRAME_COUNT).fill(null));
   const [loaded, setLoaded] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [allLoaded, setAllLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,7 +35,7 @@ export function useImageSequence() {
           if (!cancelled && done <= batchSize) {
             const p = done / batchSize;
             setProgress(p);
-            reportLoad("frames", p);
+            reportLoad("frames", p); // PageLoader waits for this to reach 1
           }
           resolve();
         };
@@ -43,23 +43,19 @@ export function useImageSequence() {
       });
 
     (async () => {
-      // Stage 1: Priority frames (block PageLoader)
+      // Stage 1: Priority frames (blocks PageLoader)
       await Promise.all(Array.from({ length: batchSize }, (_, i) => load(i)));
       if (cancelled) return;
       setLoaded(true);
+      setProgress(1);
+      reportLoad("frames", 1); // Critical frames done → PageLoader can proceed
 
-      // Stage 2: Remaining frames (background)
+      // Stage 2: Remaining frames (background, no PageLoader blocking)
       for (let i = batchSize; i < FRAME_COUNT && !cancelled; i += 6) {
         await Promise.all(
           Array.from({ length: Math.min(6, FRAME_COUNT - i) }, (_, k) => load(i + k))
         );
-        // Report total progress for all-frames-ready
-        if (!cancelled) {
-          const totalProgress = Math.min(1, done / FRAME_COUNT);
-          reportLoad("frames", totalProgress);
-        }
       }
-      if (!cancelled) setAllLoaded(true);
     })();
 
     return () => { cancelled = true; };
@@ -73,5 +69,5 @@ export function useImageSequence() {
     return null;
   }, []);
 
-  return { nearest, loaded, progress, allLoaded };
+  return { nearest, loaded, progress };
 }

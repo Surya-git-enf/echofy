@@ -11,6 +11,9 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
   const sectionRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cueRef = useRef<HTMLDivElement>(null);
+  const loadOverlayRef = useRef<HTMLDivElement>(null);
+  const loadProgressRef = useRef<HTMLDivElement>(null);
+  const loadTextRef = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
   const dirty = useRef(true);
   const { nearest, loaded, progress: loadProgress } = useImageSequence();
@@ -57,6 +60,7 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
     };
 
     size();
+    drawFrame(0);
     raf = requestAnimationFrame(loop);
 
     // Track when all frames are actually loaded
@@ -65,25 +69,28 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       if (allLoaded) {
         clearInterval(checkAllLoaded);
         setAllFramesReady(true);
+        // Fade out loading overlay
+        if (loadOverlayRef.current) {
+          loadOverlayRef.current.style.opacity = "0";
+          loadOverlayRef.current.style.pointerEvents = "none";
+        }
       }
     }, 100);
 
-    // Pin distance: 300 frames → ~300vh for 1:1 frame-per-vh feel on desktop
-    // This gives ~1 frame per 1% viewport scroll = smooth Apple feel
-    const PIN_VH = 300;
+    // Pin distance: 400vh for 300 frames = smooth Apple feel (~1.33 frame per vh)
+    // pinSpacing: true creates spacer below pin → Studio sits in that space
+    const PIN_VH = 400;
 
     const trigger = ScrollTrigger.create({
       trigger: sectionRef.current,
       start: "top top",
       end: `+=${PIN_VH}%`,
       pin: true,
-      pinSpacing: false,
+      pinSpacing: true,
       scrub: true,
       anticipatePin: 1,
       onUpdate: (self) => {
-        // Clamp progress to [0, 1] for exact frame mapping
         const clampedProgress = Math.max(0, Math.min(1, self.progress));
-        // Exact frame index: 0 to FRAME_COUNT-1 (300 frames = indices 0-299)
         const idx = Math.floor(clampedProgress * FRAME_COUNT);
         const safeIdx = Math.max(0, Math.min(FRAME_COUNT - 1, idx));
         if (safeIdx !== frame.current) {
@@ -95,13 +102,10 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
           const cueProgress = Math.max(0, 1 - clampedProgress / 0.93);
           cueRef.current.style.opacity = String(cueProgress);
         }
-        // Fire onEnd exactly at last frame (index 299 = frame 300)
+        // Fire onEnd exactly at last frame
         if (safeIdx === FRAME_COUNT - 1 && clampedProgress >= 0.995) {
           onEndRef.current();
         }
-      },
-      onLeave: () => {
-        // Pin released - normal scroll resumes
       },
     });
 
@@ -115,7 +119,28 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
     };
   }, [loaded, nearest]);
 
-  // Show subtle loading indicator until all frames ready
+  const drawFrame = (index: number) => {
+    const img = nearest(index);
+    if (!img) return;
+    const canvas = canvasRef.current!;
+    const ctx = canvas.getContext("2d")!;
+    const cw = window.innerWidth, ch = window.innerHeight;
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    if (cw < ch && iw > ih) {
+      const dh = (ih * cw) / iw, y = ch - dh;
+      ctx.save();
+      ctx.filter = "blur(10px)";
+      ctx.drawImage(img, 0, 0, iw, 2, -20, -20, cw + 40, y + 22);
+      ctx.restore();
+      ctx.drawImage(img, 0, y, cw, dh);
+      return;
+    }
+    const scale = Math.max(cw / iw, ch / ih);
+    const dw = iw * scale, dh = ih * scale;
+    ctx.drawImage(img, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+  };
+
+  // Show loading overlay until all frames ready
   if (!allFramesReady) {
     return (
       <div ref={sectionRef} className="hero">
@@ -126,8 +151,11 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
           <span>Scroll</span>
           <i />
         </div>
-        <div className="hero-load-indicator" aria-hidden="true">
-          <span>Preparing frames… {Math.round(loadProgress * 100)}%</span>
+        <div ref={loadOverlayRef} className="hero-load-overlay" aria-hidden="true">
+          <div className="hero-load-bar">
+            <div ref={loadProgressRef} className="hero-load-fill" style={{ width: `${loadProgress * 100}%` }} />
+          </div>
+          <div ref={loadTextRef} className="hero-load-text">{Math.round(loadProgress * 100)}%</div>
         </div>
       </div>
     );

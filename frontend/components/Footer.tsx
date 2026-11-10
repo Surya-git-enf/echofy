@@ -30,6 +30,7 @@ export default function Footer() {
         </li>
       </ul>
       <p className="legal">Echofy. Dub your video into any language.</p>
+      <p className="wordmark" aria-hidden="true">Echofy</p>
     </footer>
   );
 }

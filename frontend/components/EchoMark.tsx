@@ -1,11 +1,9 @@
 /** The three echo curves from the Echofy logo, bulging right. */
 export default function EchoMark({
   color = "#fff",
-  animated = false,
   className,
 }: {
   color?: string;
-  animated?: boolean;
   className?: string;
 }) {
   const arcs = [
@@ -16,7 +14,7 @@ export default function EchoMark({
   return (
     <svg viewBox="0 0 100 100" className={className} aria-hidden="true" fill="none" stroke={color} strokeWidth="8" strokeLinecap="round">
       {arcs.map((d, i) => (
-        <path key={i} d={d} className={animated ? `echo-arc echo-arc-${i + 1}` : undefined} />
+        <path key={i} d={d} />
       ))}
     </svg>
   );

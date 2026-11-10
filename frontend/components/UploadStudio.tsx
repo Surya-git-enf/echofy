@@ -124,6 +124,7 @@ export default function UploadStudio() {
             onDragLeave={() => setDragging(false)}
             onDrop={(e) => { e.preventDefault(); setDragging(false); pick(e.dataTransfer.files?.[0]); }}
           >
+            <i className="vf vf-tl" /><i className="vf vf-tr" /><i className="vf vf-bl" /><i className="vf vf-br" />
             <p className="drop-title">Drop your MP4 here</p>
             <button type="button" className="btn-ghost" onClick={() => inputRef.current?.click()}>Choose a video</button>
             <p className="note">{phase.error ?? "MP4 up to 800 MB"}</p>
@@ -134,12 +135,16 @@ export default function UploadStudio() {
           <div className="ready">
             <p className="file" title={phase.file.name}>{phase.file.name}</p>
             <p className="note">{fmtTime(phase.seconds)} long · {(phase.file.size / 1048576).toFixed(1)} MB</p>
-            <label className="select">
-              <span>Dub into</span>
-              <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-                {LANGUAGES.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
-              </select>
-            </label>
+            <fieldset className="chips">
+              <legend>Dub into</legend>
+              {LANGUAGES.map((l) => (
+                <label key={l.key} className={`chip${l.key === language ? " on" : ""}`}>
+                  <input type="radio" name="language" value={l.key} checked={l.key === language} onChange={() => setLanguage(l.key)} />
+                  <span lang={l.lang}>{l.native}</span>
+                  {l.label !== l.native && <small>{l.label}</small>}
+                </label>
+              ))}
+            </fieldset>
             <button type="button" className="btn-grad" onClick={start} disabled={short}>let&rsquo;s dub it</button>
             <p className="note">
               {short

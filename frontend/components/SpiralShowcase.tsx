@@ -56,7 +56,7 @@ export default function SpiralShowcase() {
 
   return (
     <section className="showcase" id="showcase">
-      <h2 className="grad-title">Hear the difference</h2>
+      <h2 className="section-title">Hear the difference</h2>
       <p className="showcase-note">Hover a video to play it. Drag to spin. Click to turn sound on.</p>
       <div
         className="orbit"

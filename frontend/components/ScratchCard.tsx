@@ -22,6 +22,12 @@ export default function ScratchCard({ onClose }: { onClose: () => void }) {
   }, []);
 
   useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  useEffect(() => {
     const c = canvasRef.current!;
     const ctx = c.getContext("2d")!;
     const img = new Image();
@@ -85,6 +91,9 @@ export default function ScratchCard({ onClose }: { onClose: () => void }) {
         {revealed && (
           <button type="button" className="scratch-claim" onClick={onClose} aria-label="Claim now: 100 credits added" />
         )}
+        <button type="button" className="scratch-close" onClick={onClose} aria-label="Close">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
       </div>
       {!revealed && (
         <button type="button" className="scratch-skip" onClick={reveal}>Reveal without scratching</button>

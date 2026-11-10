@@ -3,16 +3,16 @@ export const MAX_UPLOAD_BYTES = 800 * 1024 * 1024; // matches the backend limit
 
 // Languages the default Gnani voice engine can speak.
 export const LANGUAGES = [
-  { key: "hindi", label: "Hindi" },
-  { key: "telugu", label: "Telugu" },
-  { key: "tamil", label: "Tamil" },
-  { key: "kannada", label: "Kannada" },
-  { key: "malayalam", label: "Malayalam" },
-  { key: "marathi", label: "Marathi" },
-  { key: "bengali", label: "Bengali" },
-  { key: "gujarati", label: "Gujarati" },
-  { key: "punjabi", label: "Punjabi" },
-  { key: "english", label: "English" },
+  { key: "hindi", label: "Hindi", native: "हिन्दी", lang: "hi" },
+  { key: "telugu", label: "Telugu", native: "తెలుగు", lang: "te" },
+  { key: "tamil", label: "Tamil", native: "தமிழ்", lang: "ta" },
+  { key: "kannada", label: "Kannada", native: "ಕನ್ನಡ", lang: "kn" },
+  { key: "malayalam", label: "Malayalam", native: "മലയാളം", lang: "ml" },
+  { key: "marathi", label: "Marathi", native: "मराठी", lang: "mr" },
+  { key: "bengali", label: "Bengali", native: "বাংলা", lang: "bn" },
+  { key: "gujarati", label: "Gujarati", native: "ગુજરાતી", lang: "gu" },
+  { key: "punjabi", label: "Punjabi", native: "ਪੰਜਾਬੀ", lang: "pa" },
+  { key: "english", label: "English", native: "English", lang: "en" },
 ];
 
 export interface JobStatus {

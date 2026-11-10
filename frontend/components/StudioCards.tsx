@@ -33,7 +33,7 @@ export default function StudioCards() {
 
   return (
     <section ref={root} className="studio" id="studio">
-      <h2 className="studio-title">Studio</h2>
+      <h2 className="section-title">Studio</h2>
       <div className="studio-grid">
         <article className="studio-card">
           <div className="tilt card card-voice">

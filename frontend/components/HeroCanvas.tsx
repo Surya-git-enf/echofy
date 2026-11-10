@@ -5,16 +5,14 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useImageSequence } from "@/hooks/useImageSequence";
 import { FRAME_COUNT } from "@/lib/media";
 import EqualizerLoader from "./EqualizerLoader";
-import EqualizerBand from "./EqualizerBand";
 
 gsap.registerPlugin(ScrollTrigger);
 
 export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
   const sectionRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const bandRef = useRef<HTMLDivElement>(null);
+  const cueRef = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
-  const progressRef = useRef(0);
   const dirty = useRef(true);
   const { nearest, loaded, progress } = useImageSequence();
   const onEndRef = useRef(onEnd);
@@ -38,11 +36,21 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       const img = nearest(frame.current);
       if (!img) return;
       const cw = window.innerWidth, ch = window.innerHeight;
-      const scale = Math.max(cw / img.naturalWidth, ch / img.naturalHeight);
-      const dw = img.naturalWidth * scale, dh = img.naturalHeight * scale;
-      // On portrait screens follow the subject, who drifts to the right as the shot ends.
-      const anchor = cw < ch && img.naturalWidth > img.naturalHeight ? 0.4 + 0.3 * progressRef.current : 0.5;
-      ctx.drawImage(img, (cw - dw) * anchor, (ch - dh) / 2, dw, dh);
+      const iw = img.naturalWidth, ih = img.naturalHeight;
+      if (cw < ch && iw > ih) {
+        // Portrait phone with 16:9 frames: show the whole frame (headline included) along the
+        // bottom edge and extend its soft top row upward. Vertical frames would fill the screen.
+        const dh = (ih * cw) / iw, y = ch - dh;
+        ctx.save();
+        ctx.filter = "blur(10px)";
+        ctx.drawImage(img, 0, 0, iw, 2, -20, -20, cw + 40, y + 22);
+        ctx.restore();
+        ctx.drawImage(img, 0, y, cw, dh);
+        return;
+      }
+      const scale = Math.max(cw / iw, ch / ih);
+      const dw = iw * scale, dh = ih * scale;
+      ctx.drawImage(img, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
     };
 
     const loop = () => {
@@ -60,14 +68,10 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       pin: true,
       scrub: true,
       onUpdate: (self) => {
-        progressRef.current = self.progress;
         const idx = Math.round(self.progress * (FRAME_COUNT - 1));
         if (idx !== frame.current) { frame.current = idx; }
         dirty.current = true;
-        if (bandRef.current) {
-          const fade = Math.min(1, Math.max(0, (0.85 - self.progress) / 0.15));
-          bandRef.current.style.opacity = String(fade);
-        }
+        if (cueRef.current) cueRef.current.style.opacity = String(Math.max(0, 1 - self.progress * 14));
         if (self.progress >= 0.985) onEndRef.current();
       },
     });
@@ -90,8 +94,10 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       )}
       <h1 className="sr-only">Echofy: dub your video into any language</h1>
       <canvas ref={canvasRef} className="hero-canvas" aria-label="Echofy: a listener with headphones" role="img" />
-      <div ref={bandRef} className="hero-band">
-        <EqualizerBand />
+      <p className="hero-tag" aria-hidden="true">Dub once. Be heard in every language.</p>
+      <div ref={cueRef} className="hero-cue" aria-hidden="true">
+        <span>Scroll</span>
+        <i />
       </div>
     </div>
   );

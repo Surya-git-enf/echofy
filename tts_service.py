@@ -76,8 +76,29 @@ def strip_emotion_tags(text: str) -> str:
 GNANI_URL = "https://api.vachana.ai/api/v1/tts/inference"
 GNANI_MODEL = "timbre-v3.0"  # the only Vachana model with emotion tags and voices that speak every language
 GNANI_MAX_RETRIES = 4
+GNANI_MIN_SPEED, GNANI_MAX_SPEED = 0.85, 1.15
 BRACKET_TAG_PATTERN = re.compile(r"\[([^\]]{1,40})\]")
 GNANI_TAG_PATTERN = re.compile(r"<[a-z ]+>")
+# The only inline tags timbre-v3.0 understands (docs.gnani.ai, tts-inference). Anything else is dropped.
+GNANI_VALID_TAGS = ("coughs", "excited", "exhales", "giggle", "laugh", "pauses", "shouting", "sigh", "slow",
+                    "sniffles", "whispers", "yawns", "clears throat")
+ANGLE_TAG_PATTERN = re.compile(r"<\s*([A-Za-z][A-Za-z ]{0,20}?)\s*/?>")
+LATIN_LETTER = re.compile(r"[A-Za-z]")
+
+
+def clean_audio_tags(text: str) -> str:
+    """Keep valid <tags> (normalised to lower case), drop unknown ones, tidy spaces. Pure function."""
+    def fix(match):
+        name = re.sub(r"\s+", " ", match.group(1).strip().lower())
+        name = {"clear throat": "clears throat", "whisper": "whispers", "cough": "coughs", "yawn": "yawns",
+                "exhale": "exhales", "pause": "pauses", "sniffle": "sniffles"}.get(name, name)
+        return f"<{name}>" if name in GNANI_VALID_TAGS else ""
+    return re.sub(r"\s+", " ", ANGLE_TAG_PATTERN.sub(fix, text)).strip()
+
+
+def strip_audio_tags(text: str) -> str:
+    """Remove every <tag> for engines that would read them aloud."""
+    return re.sub(r"\s+", " ", ANGLE_TAG_PATTERN.sub("", text)).strip()
 
 # Words Gemini may put in [brackets] -> the audio tags timbre-v3.0 actually understands.
 # Vachana has no "angry" tag; <shouting> is the closest it offers.
@@ -105,7 +126,7 @@ def gnani_prepare(text: str, emotion: str = "neutral"):
         return GNANI_TAG_WORDS.get(match.group(1).strip().lower(), "")
 
     converted = BRACKET_TAG_PATTERN.sub(to_tag, text)
-    converted = re.sub(r"\s+", " ", converted).strip()
+    converted = clean_audio_tags(converted)
     emotion = (emotion or "neutral").lower()
     lead = GNANI_EMOTION_TAG.get(emotion)
     # Quiet anger stays a spoken line (faster only); anger with "!" gets the shouting tag.
@@ -117,7 +138,8 @@ def gnani_prepare(text: str, emotion: str = "neutral"):
     return converted, speed
 
 
-def generate_speech_gnani(text: str, language_key: str, out_path: str, emotion: str = "neutral", voice: dict = None):
+def generate_speech_gnani(text: str, language_key: str, out_path: str, emotion: str = "neutral", voice: dict = None,
+                          speed_override: float = None):
     api_key = os.getenv("GNANI_API_KEY")
     if not api_key:
         raise RuntimeError(
@@ -129,15 +151,23 @@ def generate_speech_gnani(text: str, language_key: str, out_path: str, emotion: 
     voice_name = (voice or {}).get("gnani_voice") or "Shubham"
 
     prepared_text, speed = gnani_prepare(text, emotion)
+    if speed_override is not None:  # used to fit a line into its slot; Vachana accepts 0.85 to 1.15
+        speed = round(max(GNANI_MIN_SPEED, min(GNANI_MAX_SPEED, speed_override)), 3)
     if not GNANI_TAG_PATTERN.sub("", prepared_text).strip():
         raise RuntimeError("Gnani needs some spoken words in the line, not only audio tags.")
+
+    # A line that mixes scripts (a Telugu sentence with an English name or phrase) is sent with
+    # language "auto", which Gnani recommends for mixed content; it routes each part by script.
+    language = lang["gnani_code"]
+    if language not in ("en-IN", "hi-en") and LATIN_LETTER.search(GNANI_TAG_PATTERN.sub("", prepared_text)):
+        language = "auto"
 
     headers = {"X-API-Key-ID": api_key, "Content-Type": "application/json"}
     payload = {
         "text": prepared_text,
         "model": GNANI_MODEL,
         "voice": voice_name,
-        "language": lang["gnani_code"],
+        "language": language,
         "speed": speed,
         "audio_config": {"sample_rate": 44100, "num_channels": 1, "container": "mp3", "bitrate": "192k"},
     }
@@ -332,12 +362,16 @@ def generate_speech_gtts(text: str, language_key: str, out_path: str):
 
 # ---------------- Dispatcher — strict, no cross-engine fallback ----------------
 
-def generate_speech(text: str, language_key: str, out_path: str, engine: str = "echofy", character_profile: str = "default", emotion: str = "neutral", voice: dict = None):
+def generate_speech(text: str, language_key: str, out_path: str, engine: str = "echofy", character_profile: str = "default", emotion: str = "neutral", voice: dict = None, speed: float = None):
     if not text or not text.strip():
         return
 
+    if engine != "gnani":
+        text = strip_audio_tags(text)  # <tags> are Gnani-only; other engines would read them aloud
+        if not text:
+            return
     if engine == "gnani":
-        generate_speech_gnani(text, language_key, out_path, emotion=emotion, voice=voice)
+        generate_speech_gnani(text, language_key, out_path, emotion=emotion, voice=voice, speed_override=speed)
     elif engine == "fish":
         generate_speech_fish(text, language_key, out_path, character_profile=character_profile, voice=voice)
     elif engine == "echofy":

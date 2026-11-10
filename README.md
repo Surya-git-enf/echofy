@@ -129,7 +129,42 @@ Transcription uses Gnani **`prisma-v3.0`** through `POST https://api.vachana.ai/
 2. Each stretch goes to Gnani as a 16 kHz mono WAV, one request at a time. The stretch's own start and end become the line's timing. Stretches Gnani hears no speech in are dropped.
 3. Language is `en-IN,hi-IN,te-IN,ta-IN` by default (prisma-v3.0 takes up to four codes). Set `GNANI_STT_LANGUAGE` to override, for example `te-IN`.
 
-Gemini 2.5 Flash then receives the timed lines plus the audio. It decides who is speaking and in which emotion, and writes the adapted dialogue. It returns exactly one line per source id, and timing and source text are always taken from Gnani's transcript, never from Gemini. Set `TRANSCRIBE_ENGINE=gemini` to let Gemini transcribe by itself instead.
+Set `TRANSCRIBE_ENGINE=gemini` to let Gemini transcribe by itself instead.
+
+### How the dub is written (Gemini)
+
+Gemini 2.5 Flash receives a small video (360p, 6 fps) carrying the clean vocal track, plus Gnani's timed lines with a word ceiling for each ([`gemini_service.py`](gemini_service.py)). It reads faces and body language together with the voices to decide **who speaks** and **how they feel**, then writes the adapted dialogue. The rules in the prompt, in order of importance:
+
+1. **Names never change.** Names, nicknames and pet names stay exactly as written, in Latin script. A name that is also a dictionary word ("Tiger") is still a person. Gemini lists them in `keep_terms`; after the answer, Echofy checks every line, asks Gemini **once** to repair any line that lost a name, and records a warning if one is still missing.
+2. **Common English stays English.** yes, no, okay, sorry, hi, "I love you", dad, phone, cancer and similar everyday words are kept in Latin script inside the native sentence, the way people really speak. The speech engine routes mixed-script lines with `language: "auto"`.
+3. **Only Gnani's 13 tags**, in angle brackets, placed directly before the words they colour: `<coughs> <excited> <exhales> <giggle> <laugh> <pauses> <shouting> <sigh> <slow> <sniffles> <whispers> <yawns> <clears throat>`. Any other tag is removed.
+4. **Every line has spoken words.** A tag-only or empty line is dropped with a warning. (Gnani's docs state the 400 for tag-only text under timbre-v2.5; Echofy avoids it for v3.0 too.)
+5. **Stay in the span.** A dub line must fit its source line's span. A source line may be split into two to four parts, for example when the speaker changes. Each part gets its own start and end, kept inside the span, in order and not overlapping.
+6. **One entry per source id.** Nothing is dropped, reordered or invented. Timing and source text always come from Gnani's transcript, never from Gemini.
+
+The shape Gemini returns (the prompt contains a longer worked example, with an invented scene):
+
+```json
+{
+  "keep_terms": ["Mira", "Tiger"],
+  "characters": [
+    {"id": "speaker_1", "name_guess": "Mira", "gender": "female", "age_group": "young", "archetype": "default"},
+    {"id": "speaker_2", "name_guess": "Tiger", "gender": "male", "age_group": "young", "archetype": "default"}
+  ],
+  "lines": [
+    {"id": 0, "speaker": "speaker_1", "emotion": "serious", "text": "<sigh> Tiger, ఈ రోజు late చేయనని promise చేశావ్ కదా."},
+    {"id": 5, "start": 40.0, "end": 41.8, "speaker": "speaker_2", "emotion": "excited", "text": "<exhales> Okay, okay, sorry!"},
+    {"id": 5, "start": 42.0, "end": 44.0, "speaker": "speaker_1", "emotion": "excited", "text": "<laugh> పర్లేదు, ఇలా రా."}
+  ]
+}
+```
+
+### Keeping the dub on the timeline
+
+- Every line starts at its detected start time. The audio track is padded to the full video length.
+- A line that is too long for its slot is first **re-recorded faster** through Vachana's `speed` parameter (maximum 1.15, the documented limit). Only if it is still too long is the finished audio sped up, by at most 1.35 times. Each segment in the run output records its `tts_speed`, `speedup` and `slot_seconds`.
+- Emotion sets a default speed (for example 0.90 for sad, 1.10 for shouting), always inside 0.85 to 1.15.
+- Gemini's own timestamps are not used for placement. Gnani's speech detection is more precise, so Gemini only splits a line inside its span when it hears a speaker change.
 
 ### Tested
 
@@ -222,6 +257,8 @@ Results go to `test/outputs/<input>__<language>/` and are scored by the quality 
 | `GNANI_API_KEY` | always (speech-to-text) and engine `gnani` (default, TTS) | Gnani Vachana STT and TTS |
 | `GNANI_STT_LANGUAGE` | optional | Source language codes for STT, default `en-IN,hi-IN,te-IN,ta-IN` |
 | `TRANSCRIBE_ENGINE` | optional | `gnani` (default) or `gemini` to let Gemini transcribe |
+| `GEMINI_VISION` | optional | `1` (default) sends Gemini a small video with the voice track; `0` sends audio only |
+| `GEMINI_DIALOGUE_MODEL` | optional | Gemini model for dialogue writing, default `gemini-2.5-flash` |
 | `FISH_AUDIO_API_KEY`, `FISH_VOICE_POOL` | engine `fish` | Any-language TTS; the pool is JSON `{"male": ["id"], "female": ["id"]}` |
 | `SARVAM_API_KEY` | engine `sarvam` | Sarvam TTS |
 | `ECHOFY_VOICE_SERVICE_URL` | engine `echofy` | Self-hosted IndicF5 service |
@@ -362,8 +399,10 @@ echofy/
 
 - Uploads are capped at 800 MB. Slow connections can truncate large uploads, so compress first.
 - Credits are client-side (see above).
-- Gnani's synchronous STT has no speaker labels or timestamps, so speaker identity comes from Gemini listening to the audio. Its batch API can separate two speakers, which is not used.
+- Gnani's synchronous STT has no speaker labels or timestamps, so speaker identity comes from Gemini watching and listening. Its batch API can separate two speakers, which is not used.
 - A stretch of speech with no pause longer than 25 seconds is cut at an arbitrary point before transcription.
+- Name protection is a prompt rule plus one repair pass. A name Gemini still loses is reported in the run warnings, not silently accepted.
+- The Telugu and Hindi sentences in the prompt example were written without a native-speaker review.
 - Gnani voices cover English, Hinglish and 10 Indian languages. Other languages need the `fish` or `edge` engine.
 - Automated checks do not replace listening to the result.
 

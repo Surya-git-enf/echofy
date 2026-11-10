@@ -69,6 +69,19 @@ def extract_audio(video_path: str, audio_out_path: str, sample_rate: int = 16000
     _run(cmd)
 
 
+def make_vision_proxy(video_path: str, audio_path: str, out_path: str):
+    """
+    A small copy of the video (360p, few frames per second) carrying the given clean voice track.
+    Gemini reads faces and body language from it and hears the voices, and the upload stays small.
+    """
+    _run([
+        "ffmpeg", "-y", "-hide_banner", "-i", video_path, "-i", audio_path,
+        "-map", "0:v:0", "-map", "1:a:0", "-vf", "scale=-2:360,fps=6",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "32", "-c:a", "aac", "-b:a", "64k", "-ac", "1",
+        "-shortest", out_path,
+    ])
+
+
 def prepare_segment(src_path: str, dst_path: str, max_duration: float = None, pitch_semitones: float = 0.0) -> dict:
     """
     Make one TTS clip ready for the timeline: trim leading/trailing silence, shift pitch

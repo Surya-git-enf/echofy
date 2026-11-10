@@ -12,6 +12,7 @@ good; that needs scripts/run_local_dub.py with real API keys.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -177,14 +178,20 @@ def test_gnani_request_shape_retry_and_errors():
         os.environ["GNANI_API_KEY"] = "test-key"
         tts_service.requests.post, tts_service.time.sleep = fake_post, lambda s: None
         out = os.path.join(work, "out.mp3")
-        REAL_GENERATE_SPEECH("[angry] Get out of here!", "telugu", out, engine="gnani", emotion="angry",
+        REAL_GENERATE_SPEECH("[angry] ఇక్కడ నుంచి వెళ్ళు!", "telugu", out, engine="gnani", emotion="angry",
                              voice={"gnani_voice": "Harshad"})
         url, headers, payload = calls[-1]
         assert url == "https://api.vachana.ai/api/v1/tts/inference" and len(calls) == 2  # 429 then success
         assert headers["X-API-Key-ID"] == "test-key"
         assert payload["model"] == "timbre-v3.0" and payload["voice"] == "Harshad" and payload["language"] == "te-IN"
-        assert payload["text"] == "<shouting> Get out of here!" and payload["speed"] == 1.1
+        assert payload["text"] == "<shouting> ఇక్కడ నుంచి వెళ్ళు!" and payload["speed"] == 1.1
         assert payload["audio_config"]["container"] == "mp3" and os.path.getsize(out) == len(audio)
+
+        # a Telugu line that holds English words (names, "dad", "cancer") is sent with language "auto"
+        replies.append(FakeResponse(200, audio))
+        REAL_GENERATE_SPEECH("<exhales> నీ dad కి <pauses> నిజంగానే cancer ఉందా?", "telugu", out, engine="gnani",
+                             voice={"gnani_voice": "Harshad"})
+        assert calls[-1][2]["language"] == "auto" and calls[-1][2]["text"].startswith("<exhales> నీ dad")
 
         tts_service.requests.post = lambda *a, **k: FakeResponse(403, text="no credits")
         try:
@@ -386,7 +393,7 @@ def test_dialogue_is_joined_to_the_transcript_by_id():
             "characters": [{"id": "speaker_1", "gender": "female"}, {"id": "speaker_2", "gender": "male"}],
             "lines": [  # out of order, one corrected, one with an unknown speaker id
                 {"id": 2, "speaker": "speaker_1", "emotion": "calm", "text": "థ్యాంక్స్, నేను మాయ"},
-                {"id": 0, "speaker": "speaker_1", "emotion": "excited", "corrected_source": "Hi, is this seat free?", "text": "హాయ్, ఈ సీట్ ఖాళీయేనా?"},
+                {"id": 0, "speaker": "speaker_1", "emotion": "excited", "source_text": "Hi, is this seat free?", "text": "హాయ్, ఈ సీట్ ఖాళీయేనా?"},
                 {"id": 1, "speaker": "speaker_9", "emotion": "bogus", "text": "లేదు లేదు, కూర్చో"},
             ]}
     script = gemini_service.build_script_from_lines(SOURCE_LINES, data, 7.0)
@@ -432,8 +439,9 @@ def test_adapt_dialogue_sends_the_transcript_and_audio_to_gemini():
     finally:
         genai.Client, gtypes.HttpOptions, gtypes.GenerateContentConfig = saved
     prompt = seen["contents"][0]
-    assert 'id=0  1.5s  max 4 words  "Hi, is this seat taken?"' in prompt
-    assert "Telugu" in prompt and "{" not in prompt.split("OUTPUT:")[0]  # no unfilled template fields
+    assert 'id=0  1.5s  max 4 words  (span 0.5 to 2.0)  "Hi, is this seat taken?"' in prompt
+    assert "Telugu" in prompt and not re.search(r"\{[a-z_]+\}", prompt)  # no unfilled template fields
+    assert "NAMES NEVER CHANGE" in prompt and "<whispers>" in prompt and "<angry>" not in prompt
     assert seen["contents"][1] == "uploaded" and seen["audio"] == "a.wav"
     assert seen["config"]["system_instruction"] == gemini_service.DIALOGUE_SYSTEM_INSTRUCTION
     assert [s["translated_text"] for s in out["segments"]] == ["line 0", "line 1", "line 2"]
@@ -476,6 +484,153 @@ def test_pipeline_uses_gnani_transcription_by_default():
             assert "no spoken dialogue" in str(exc)
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------------------------
+# Names, tags, split parts, repair and the video upload wait
+# ---------------------------------------------------------------------------------------------
+def _fake_gemini(replies, upload_result="uploaded"):
+    """Install a fake Gemini client that answers with the given JSON replies in order. Returns (calls, restore)."""
+    calls, answers = [], iter(replies)
+
+    class FakeFiles:
+        def upload(self, file):
+            return upload_result
+
+    class FakeModels:
+        def generate_content(self, model, contents, config):
+            calls.append(contents)
+            return types.SimpleNamespace(text=json.dumps(next(answers)))
+
+    class FakeClient:
+        def __init__(self, api_key=None, http_options=None):
+            self.files, self.models = FakeFiles(), FakeModels()
+
+    genai, gtypes = sys.modules["google.genai"], sys.modules["google.genai.types"]
+    saved = (genai.Client, getattr(gtypes, "HttpOptions", None), getattr(gtypes, "GenerateContentConfig", None))
+    genai.Client, gtypes.HttpOptions, gtypes.GenerateContentConfig = FakeClient, (lambda **kw: kw), (lambda **kw: kw)
+    os.environ["GEMINI_API_KEY"] = "test-key"
+
+    def restore():
+        genai.Client, gtypes.HttpOptions, gtypes.GenerateContentConfig = saved
+    return calls, restore
+
+
+NAME_LINES = [
+    {"id": 0, "start": 1.0, "end": 3.0, "text": "Tiger, you promised."},
+    {"id": 1, "start": 4.0, "end": 5.5, "text": "Sorry, the traffic was terrible."},
+]
+CHAR = [{"id": "speaker_1", "name_guess": "Mira", "gender": "female"}, {"id": "speaker_2", "name_guess": "Tiger", "gender": "male"}]
+
+
+def test_a_translated_name_is_repaired_once():
+    first = {"keep_terms": ["Tiger"], "characters": CHAR, "lines": [
+        {"id": 0, "speaker": "speaker_1", "emotion": "serious", "text": "బెబ్బులి, నువ్వు మాటిచ్చావ్ కదా."},  # the name became a word
+        {"id": 1, "speaker": "speaker_2", "emotion": "calm", "text": "Sorry, traffic దారుణంగా ఉంది."}]}
+    repaired = {"lines": [{"id": 0, "text": "Tiger, నువ్వు మాటిచ్చావ్ కదా."}]}
+    calls, restore = _fake_gemini([first, repaired])
+    try:
+        script = REAL_ADAPT(NAME_LINES, "v.mp4", "Telugu", 6.0)
+    finally:
+        restore()
+    assert len(calls) == 2 and "must contain: Tiger" in calls[1][0]
+    assert script["segments"][0]["translated_text"].startswith("Tiger,") and script["warnings"] == []
+    assert script["keep_terms"] == ["Tiger", "Mira"]
+
+    stubborn = {"lines": [{"id": 0, "text": "బెబ్బులి, మాటిచ్చావ్ కదా."}]}
+    calls, restore = _fake_gemini([first, stubborn])
+    try:
+        script = REAL_ADAPT(NAME_LINES, "v.mp4", "Telugu", 6.0)
+    finally:
+        restore()
+    assert any("Tiger" in w and "missing" in w for w in script["warnings"])  # reported, never hidden
+
+
+def test_tags_are_limited_and_tag_only_parts_are_dropped():
+    assert tts_service.clean_audio_tags("<Whispers> hi <angry> there <clear throat> x") == "<whispers> hi there <clears throat> x"
+    assert tts_service.strip_audio_tags("<sigh> hello <pauses> world") == "hello world"
+    assert gemini_service.has_spoken_words("<sigh> Hmm") and not gemini_service.has_spoken_words("<sigh> <pauses> ...")
+    data = {"characters": CHAR, "lines": [
+        {"id": 0, "speaker": "speaker_1", "text": "<sigh>"},                       # tag only
+        {"id": 1, "speaker": "speaker_2", "text": "<angry> Sorry, <pauses> okay."}]}  # <angry> is not a Gnani tag
+    script = gemini_service.build_script_from_lines(NAME_LINES, data, 6.0)
+    assert [s["translated_text"] for s in script["segments"]] == ["Sorry, <pauses> okay."]
+    assert any("no spoken words" in w for w in script["warnings"])
+
+
+def test_split_parts_stay_inside_their_source_span():
+    src = {"id": 5, "start": 40.0, "end": 44.0, "text": "Okay, okay, sorry! It's fine. Come here."}
+    parts = [{"start": 42.0, "end": 47.0}, {"start": 38.0, "end": 41.0}]  # out of order, outside the span
+    times = gemini_service._clamp_parts(parts, src)
+    assert all(40.0 <= a < b <= 44.0 for a, b in times), times
+    assert times[0][1] <= times[1][0] + 1e-9  # in order, not overlapping
+    assert gemini_service._clamp_parts([{}], src) == [(40.0, 44.0)]  # no times: the whole span
+    data = {"characters": CHAR, "lines": [
+        {"id": 5, "speaker": "speaker_2", "start": 40.0, "end": 41.8, "text": "Okay, okay, sorry!"},
+        {"id": 5, "speaker": "speaker_1", "start": 42.0, "end": 44.0, "text": "<laugh> పర్లేదు, ఇలా రా."}]}
+    script = gemini_service.build_script_from_lines([src], data, 50.0)
+    assert [(s["start"], s["speaker"]) for s in script["segments"]] == [(40.0, "speaker_2"), (42.0, "speaker_1")]
+
+
+def test_video_upload_is_awaited_until_active():
+    states = iter(["PROCESSING", "PROCESSING", "ACTIVE"])
+
+    def file(state):
+        return types.SimpleNamespace(name="files/abc", state=types.SimpleNamespace(name=state))
+
+    class Client:
+        class files:
+            @staticmethod
+            def get(name):
+                return file(next(states))
+
+    gemini_service.time.sleep = lambda s: None
+    assert gemini_service._wait_until_active(Client, file("PROCESSING")).state.name == "ACTIVE"
+    try:
+        gemini_service._wait_until_active(Client, file("FAILED"))
+        raise AssertionError("a failed upload should raise")
+    except RuntimeError as exc:
+        assert "could not process" in str(exc)
+
+
+def test_gemini_gets_a_video_and_long_gnani_lines_are_re_recorded_faster():
+    work, audio_dir = tempfile.mkdtemp(), tempfile.mkdtemp()
+    try:
+        long_mp3 = os.path.join(audio_dir, "long.mp3")  # 2.2 s of speech for a line whose slot is 1.5 s
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=300:d=2.2,volume=0.4",
+                        "-c:a", "libmp3lame", long_mp3], check=True)
+        audio = open(long_mp3, "rb").read()
+        sent, seen = [], {}
+        os.environ["GNANI_API_KEY"] = "test-key"
+        os.environ.pop("TRANSCRIBE_ENGINE", None)
+        tts_service.requests.post = lambda url, headers=None, json=None, timeout=None: (sent.append(json), FakeResponse(200, audio))[1]
+        tts_service.generate_speech = REAL_GENERATE_SPEECH
+        lines = [{"id": i, "start": 0.4 + i * 2.0, "end": 1.4 + i * 2.0, "text": f"source {i}"} for i in range(3)]
+        stt_service.transcribe_audio = lambda *a, **k: lines
+
+        def fake_adapt(source_lines, media, label, total):
+            seen["media"] = media
+            return gemini_service.build_script_from_lines(source_lines, {"characters": CHARACTERS, "lines": [
+                {"id": l["id"], "speaker": CHARACTERS[l["id"]]["id"], "emotion": "neutral", "text": TELUGU[l["id"]]}
+                for l in source_lines]}, total)
+
+        gemini_service.adapt_dialogue = fake_adapt
+        result = pipeline.process_video(INPUT, "telugu", "gnani", work)
+
+        probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,height", "-of", "csv=p=0", seen["media"]],
+                               capture_output=True, text=True).stdout
+        assert "video" in probe and "audio" in probe and "360" in probe, probe  # a 360p video with the voice track
+        assert len(sent) == 6  # every line was recorded twice, once at normal speed and once faster
+        assert [p["speed"] for p in sent[0::2]] == [1.0, 1.0, 1.0] and [p["speed"] for p in sent[1::2]] == [1.15, 1.15, 1.15]
+        assert all(s["tts_speed"] == 1.15 and s["speedup"] <= video_service.MAX_SPEEDUP + 1e-6 for s in result["segments"])
+
+        os.environ["GEMINI_VISION"] = "0"  # audio-only switch
+        pipeline.process_video(INPUT, "telugu", "gnani", tempfile.mkdtemp())
+        assert seen["media"].endswith("transcribe_input.wav")
+    finally:
+        os.environ.pop("GEMINI_VISION", None)
+        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(audio_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

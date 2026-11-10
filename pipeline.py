@@ -28,6 +28,24 @@ def _time_slot(segments: list, index: int, total_duration: float) -> float:
     return max(own, min(room, own * 1.5))
 
 
+# A Gnani line that needs more than this speed-up is spoken faster (up to the engine's 1.15) and
+# re-recorded, instead of squeezing the finished audio. A squeezed clip loses naturalness first.
+REFIT_THRESHOLD = 1.12
+
+
+def _vision_input(local_video_path: str, audio_path: str, work_dir: str) -> str:
+    """What Gemini watches: a small video with the clean voice track. Falls back to audio only."""
+    if os.getenv("GEMINI_VISION", "1").lower() in ("0", "false", "off", "no"):
+        return audio_path
+    try:
+        proxy = os.path.join(work_dir, "vision_proxy.mp4")
+        video_service.make_vision_proxy(local_video_path, audio_path, proxy)
+        return proxy
+    except video_service.FFmpegError as exc:
+        print(f"[pipeline] could not build the video preview for Gemini ({str(exc)[-200:]}); using audio only.")
+        return audio_path
+
+
 def process_video(local_video_path: str, target_language: str, voice_engine: str, work_dir: str,
                   on_progress=None, stem_cache_dir: str = None) -> dict:
     """
@@ -71,7 +89,8 @@ def process_video(local_video_path: str, target_language: str, voice_engine: str
         if not source_lines:
             raise RuntimeError("Gnani found no spoken dialogue in this video, so there is nothing to dub.")
         progress("Writing the dub", 38)
-        script = gemini_service.adapt_dialogue(source_lines, transcribe_input, lang["label"], total_duration)
+        media = _vision_input(local_video_path, transcribe_input, work_dir)
+        script = gemini_service.adapt_dialogue(source_lines, media, lang["label"], total_duration)
     segments = script["segments"]
     if not segments:
         raise RuntimeError("No spoken dialogue was found in this video, so there is nothing to dub.")
@@ -91,7 +110,18 @@ def process_video(local_video_path: str, target_language: str, voice_engine: str
         slot = _time_slot(segments, i, total_duration)
         fit_path = os.path.join(work_dir, f"segment_{i}.wav")
         fit = video_service.prepare_segment(raw_path, fit_path, max_duration=slot, pitch_semitones=voice["pitch_semitones"])
-        seg.update(index=i, voice_id=voice["voice_id"], tts_path=raw_path, slot_seconds=slot,
+        tts_speed = None
+        if voice_engine == "gnani" and fit["speedup"] > REFIT_THRESHOLD:
+            base_speed = tts_service.gnani_prepare(seg["translated_text"], seg["emotion"])[1]
+            tts_speed = min(tts_service.GNANI_MAX_SPEED, round(base_speed * fit["raw_duration"] / slot, 3))
+            if tts_speed > base_speed + 0.02:
+                tts_service.generate_speech(
+                    seg["translated_text"], target_language, raw_path,
+                    engine=voice_engine, character_profile=seg["character_profile"],
+                    emotion=seg["emotion"], voice=voice, speed=tts_speed,
+                )
+                fit = video_service.prepare_segment(raw_path, fit_path, max_duration=slot, pitch_semitones=voice["pitch_semitones"])
+        seg.update(tts_speed=tts_speed, index=i, voice_id=voice["voice_id"], tts_path=raw_path, slot_seconds=slot,
                    raw_duration=fit["raw_duration"], speedup=fit["speedup"], dubbed_duration=fit["duration"])
         segment_files.append({"start": seg["start"], "end": seg["end"], "path": fit_path})
         progress("Generating dubbed speech", min(70, int(45 + 25 * (i + 1) / len(segments))))

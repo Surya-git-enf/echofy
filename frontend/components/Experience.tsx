@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useRef, useState } from "react";
 import { welcomeSeen } from "@/lib/credits";
+import PageLoader from "./PageLoader";
 import Navbar from "./Navbar";
 import HeroCanvas from "./HeroCanvas";
 import ScratchCard from "./ScratchCard";
@@ -17,6 +18,7 @@ export default function Experience() {
 
   return (
     <main id="top">
+      <PageLoader />
       <Navbar />
       <HeroCanvas onEnd={onHeroEnd} />
       <UploadStudio />

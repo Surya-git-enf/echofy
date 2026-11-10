@@ -1,11 +1,12 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { reportLoad } from "@/lib/loadProgress";
 import { FRAME_COUNT, FRAMES_DIR, MOBILE_FRAMES_DIR, frameSrc } from "@/lib/media";
 
-const FIRST_BATCH = 40;
+const FIRST_BATCH = 100;
 
 /**
- * Loads the hero frames in two stages: the first 40 block the page loader, the rest
+ * Loads the hero frames in two stages: the first 100 block the page loader, the rest
  * stream in behind it. `nearest(i)` returns the closest already-loaded frame at or
  * before i, so scrolling fast never shows a blank canvas.
  */
@@ -26,7 +27,7 @@ export function useImageSequence() {
         img.onload = img.onerror = () => {
           if (img.naturalWidth > 0) images.current[i] = img;
           done++;
-          if (!cancelled && done <= FIRST_BATCH) setProgress(done / FIRST_BATCH);
+          if (!cancelled && done <= FIRST_BATCH) { setProgress(done / FIRST_BATCH); reportLoad("frames", done / FIRST_BATCH); }
           resolve();
         };
         img.src = frameSrc(i, dir);

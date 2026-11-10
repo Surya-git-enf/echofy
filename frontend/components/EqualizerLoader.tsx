@@ -1,10 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
-import EchoMark from "./EchoMark";
 
-const PILLS = 25; // the middle 5 are replaced by the logo curves
+const PILLS = 25;
 
-export default function EqualizerLoader({ phrases, caption }: { phrases?: string[]; caption?: string }) {
+/**
+ * Equalizer loader. With `progress` (0..1) each pill turns solid black in turn, so the bar
+ * reads as a real progress meter. Without it the pills just pulse at half opacity.
+ */
+export default function EqualizerLoader({ progress, phrases, caption }: { progress?: number; phrases?: string[]; caption?: string }) {
   const [i, setI] = useState(0);
 
   useEffect(() => {
@@ -13,16 +16,23 @@ export default function EqualizerLoader({ phrases, caption }: { phrases?: string
     return () => window.clearInterval(t);
   }, [phrases]);
 
+  const lit = progress === undefined ? 0 : Math.round(Math.min(1, Math.max(0, progress)) * PILLS);
+
   return (
-    <div className="eql" role="status" aria-live="polite">
+    <div
+      className="eql"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={progress === undefined ? undefined : Math.round(progress * 100)}
+    >
       <div className="eql-bars" aria-hidden="true">
         {Array.from({ length: PILLS }, (_, n) => {
-          const middle = n >= 10 && n <= 14;
           const edge = Math.abs(n - 12) / 12; // 0 centre .. 1 edges
           return (
             <span
               key={n}
-              className={`eql-pill${middle ? " is-hidden" : ""}`}
+              className={`eql-pill${n < lit ? " is-on" : ""}${progress === undefined ? " is-idle" : ""}`}
               style={{
                 animationDelay: `${(n % 7) * 0.09}s`,
                 animationDuration: `${0.9 + ((n * 37) % 10) / 10}s`,
@@ -32,9 +42,8 @@ export default function EqualizerLoader({ phrases, caption }: { phrases?: string
             />
           );
         })}
-        <EchoMark color="#000" className="eql-mark" />
       </div>
-      <p className="eql-phrase" key={i}>{phrases ? phrases[i] : caption}</p>
+      <p className="eql-phrase" key={i} aria-live="polite">{phrases ? phrases[i] : caption}</p>
     </div>
   );
 }

@@ -157,7 +157,7 @@ export default function UploadStudio() {
 
         {busy && (
           <div className="busy">
-            <EqualizerLoader phrases={PHRASES} />
+            <EqualizerLoader phrases={PHRASES} progress={pct / 100} />
             <p className="note" role="status">{stageText}</p>
           </div>
         )}

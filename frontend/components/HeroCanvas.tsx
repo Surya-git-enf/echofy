@@ -4,7 +4,6 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useImageSequence } from "@/hooks/useImageSequence";
 import { FRAME_COUNT } from "@/lib/media";
-import EqualizerLoader from "./EqualizerLoader";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -14,7 +13,7 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
   const cueRef = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
   const dirty = useRef(true);
-  const { nearest, loaded, progress } = useImageSequence();
+  const { nearest, loaded } = useImageSequence();
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
 
@@ -66,7 +65,7 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       start: "top top",
       end: "+=400%",
       pin: true,
-      scrub: true,
+      scrub: 0.5,
       onUpdate: (self) => {
         const idx = Math.round(self.progress * (FRAME_COUNT - 1));
         if (idx !== frame.current) { frame.current = idx; }
@@ -87,11 +86,6 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
 
   return (
     <div ref={sectionRef} className="hero">
-      {!loaded && (
-        <div className="hero-loading">
-          <EqualizerLoader caption={`Warming up ${Math.round(progress * 100)}%`} />
-        </div>
-      )}
       <h1 className="sr-only">Echofy: dub your video into any language</h1>
       <canvas ref={canvasRef} className="hero-canvas" aria-label="Echofy: a listener with headphones" role="img" />
       <p className="hero-tag" aria-hidden="true">Dub once. Be heard in every language.</p>

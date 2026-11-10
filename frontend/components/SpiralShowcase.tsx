@@ -1,12 +1,55 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { SHOWCASE_VIDEOS } from "@/lib/media";
+import SoundToggle from "./SoundToggle";
 
 const STEP = 360 / SHOWCASE_VIDEOS.length;
 
+type ReelProps = {
+  video: (typeof SHOWCASE_VIDEOS)[number];
+  index: number;
+  radius: number;
+  moved: React.RefObject<number>;
+  onHover: (on: boolean) => void;
+};
+
+function Reel({ video, index, radius, moved, onHover }: ReelProps) {
+  const ref = useRef<HTMLVideoElement>(null);
+
+  const enter = (e: React.PointerEvent) => {
+    if (e.pointerType !== "mouse") return;
+    onHover(true);
+    ref.current?.play().catch(() => {});
+  };
+  const leave = (e: React.PointerEvent) => {
+    if (e.pointerType !== "mouse") return;
+    onHover(false);
+    if (ref.current?.muted) ref.current.pause(); // a video you turned sound on for keeps playing
+  };
+  const click = () => {
+    if (moved.current > 6) return; // that was a drag, not a tap
+    const v = ref.current;
+    if (!v) return;
+    if (v.paused) v.play().catch(() => {});
+    else v.pause();
+  };
+
+  return (
+    <div
+      className="reel"
+      style={{ transform: `rotateY(${index * STEP}deg) translateZ(${radius}px)` }}
+      onPointerEnter={enter}
+      onPointerLeave={leave}
+      onClick={click}
+    >
+      <video ref={ref} src={video.src} muted loop playsInline preload="metadata" aria-label={video.label} />
+      <SoundToggle videoRef={ref} />
+    </div>
+  );
+}
+
 export default function SpiralShowcase() {
   const ring = useRef<HTMLDivElement>(null);
-  const videos = useRef<(HTMLVideoElement | null)[]>([]);
   const rot = useRef(0);
   const hovering = useRef(false);
   const dragging = useRef(false);
@@ -29,35 +72,25 @@ export default function SpiralShowcase() {
       const dt = Math.min(0.05, (t - last) / 1000);
       last = t;
       if (!hovering.current && !dragging.current && !reduced) rot.current -= 12 * dt;
-      if (ring.current) ring.current.style.transform = `translateZ(${-radius}px) rotateX(-4deg) rotateY(${rot.current}deg)`;
+      const el = ring.current;
+      if (el) {
+        el.style.transform = `translateZ(${-radius}px) rotateX(-4deg) rotateY(${rot.current}deg)`;
+        // Depth cue: reels fade into a rose shade as they swing round to the back.
+        Array.from(el.children).forEach((child, i) => {
+          const facing = Math.cos(((i * STEP + rot.current) * Math.PI) / 180); // 1 front .. -1 back
+          (child as HTMLElement).style.setProperty("--shade", ((1 - facing) / 2).toFixed(3));
+        });
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [radius]);
 
-  const enter = (i: number, e: React.PointerEvent) => {
-    if (e.pointerType !== "mouse") return;
-    hovering.current = true;
-    videos.current[i]?.play().catch(() => {});
-  };
-  const leave = (i: number, e: React.PointerEvent) => {
-    if (e.pointerType !== "mouse") return;
-    hovering.current = false;
-    videos.current[i]?.pause();
-  };
-  const click = (i: number) => {
-    if (moved.current > 6) return;
-    const v = videos.current[i];
-    if (!v) return;
-    if (v.paused) { hovering.current = true; v.play().catch(() => {}); }
-    else v.muted = !v.muted; // hover plays muted; a click turns sound on or off
-  };
-
   return (
     <section className="showcase" id="showcase">
       <h2 className="section-title">Hear the difference</h2>
-      <p className="showcase-note">Hover a video to play it. Drag to spin. Click to turn sound on.</p>
+      <p className="showcase-note">Hover or tap a video to play it. Tap the speaker for sound. Drag to spin.</p>
       <div
         className="orbit"
         onPointerDown={(e) => { dragging.current = true; moved.current = 0; lastX.current = e.clientX; }}
@@ -73,24 +106,7 @@ export default function SpiralShowcase() {
       >
         <div ref={ring} className="orbit-ring">
           {SHOWCASE_VIDEOS.map((v, i) => (
-            <div
-              key={v.id}
-              className="reel"
-              style={{ transform: `rotateY(${i * STEP}deg) translateZ(${radius}px)` }}
-              onPointerEnter={(e) => enter(i, e)}
-              onPointerLeave={(e) => leave(i, e)}
-              onClick={() => click(i)}
-            >
-              <video
-                ref={(el) => { videos.current[i] = el; }}
-                src={v.src}
-                muted
-                loop
-                playsInline
-                preload="metadata"
-                aria-label={v.label}
-              />
-            </div>
+            <Reel key={v.id} video={v} index={i} radius={radius} moved={moved} onHover={(on) => { hovering.current = on; }} />
           ))}
         </div>
       </div>

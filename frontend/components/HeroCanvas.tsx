@@ -77,7 +77,7 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       start: "top top",
       end: `+=${PIN_VH}%`,
       pin: true,
-      pinSpacing: true,
+      pinSpacing: false,
       scrub: true,
       anticipatePin: 1,
       onUpdate: (self) => {

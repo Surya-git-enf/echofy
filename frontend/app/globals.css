@@ -90,6 +90,31 @@ button, select { font: inherit; }
 .hero-cue i { width: 1.5px; height: 44px; background: linear-gradient(to bottom, #fff, transparent); transform-origin: top; animation: cue 2.2s ease-in-out infinite; }
 @keyframes cue { 0% { transform: scaleY(0); } 55% { transform: scaleY(1); } 100% { transform: scaleY(1); opacity: 0; } }
 
+/* ---------- hero text reveal ---------- */
+.hero-headline { position: absolute; left: 50%; top: 35%; z-index: 3; transform: translateX(-50%); text-align: center; pointer-events: none; max-width: 80%; }
+.hero-headline-label { margin: 0 0 8px; font-family: var(--font-display); font-weight: 400; text-transform: uppercase; letter-spacing: 0.08em; font-size: clamp(0.85rem, 2.2vw, 1.15rem); color: var(--ink); opacity: 0.7; }
+.hero-headline-main { margin: 0; font-family: var(--font-serif); font-style: italic; font-weight: 300; font-size: clamp(2.2rem, 5.5vw, 3.8rem); line-height: 1.05; letter-spacing: -0.01em; color: var(--ink); }
+
+.hero-subhead { position: absolute; left: 50%; top: 48%; z-index: 3; transform: translateX(-50%); text-align: center; pointer-events: none; max-width: 70%; }
+.hero-subhead p { margin: 0; font-family: var(--font-body); font-size: clamp(1rem, 2vw, 1.25rem); line-height: 1.5; color: var(--ink); opacity: 0.75; }
+
+.hero-tagline { position: absolute; left: 50%; top: 58%; z-index: 3; transform: translateX(-50%); text-align: center; pointer-events: none; max-width: 85%; }
+.hero-tagline p { margin: 0; font-family: var(--font-body); font-size: clamp(0.85rem, 1.6vw, 1rem); line-height: 1.5; color: var(--ink); opacity: 0.55; }
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .hero-headline { top: 30%; max-width: 90%; }
+  .hero-subhead { top: 45%; max-width: 85%; }
+  .hero-tagline { top: 55%; max-width: 90%; }
+}
+
+@media (max-width: 480px) {
+  .hero-headline { top: 28%; }
+  .hero-subhead { top: 43%; }
+  .hero-tagline { top: 53%; }
+  .hero-headline-main { line-height: 1.1; }
+}
+
 /* ---------- equaliser loader ---------- */
 .eql { display: flex; flex-direction: column; align-items: center; gap: 18px; }
 .eql-bars { position: relative; display: flex; align-items: center; gap: 6px; height: 110px; }

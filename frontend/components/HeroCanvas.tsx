@@ -11,6 +11,9 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
   const sectionRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cueRef = useRef<HTMLDivElement>(null);
+  const headlineRef = useRef<HTMLDivElement>(null);
+  const subheadRef = useRef<HTMLDivElement>(null);
+  const taglineRef = useRef<HTMLDivElement>(null);
   const frame = useRef(0);
   const dirty = useRef(true);
   const { nearest, loaded, allLoaded } = useImageSequence();
@@ -92,6 +95,45 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
           const cueProgress = Math.max(0, 1 - clampedProgress / 0.93);
           cueRef.current.style.opacity = String(cueProgress);
         }
+        // Animate text reveal based on scroll progress
+        const p = clampedProgress;
+
+        // Headline: reveals 60% → 80%, rises from 40px to 0, fades 0→1
+        if (headlineRef.current) {
+          if (p >= 0.60) {
+            const t = Math.min((p - 0.60) / 0.20, 1);
+            headlineRef.current.style.opacity = String(t);
+            headlineRef.current.style.transform = `translateY(${40 - 40 * t}px)`;
+          } else {
+            headlineRef.current.style.opacity = "0";
+            headlineRef.current.style.transform = "translateY(40px)";
+          }
+        }
+
+        // Subhead: reveals 70% → 85%, rises from 30px to 0, fades 0→1
+        if (subheadRef.current) {
+          if (p >= 0.70) {
+            const t = Math.min((p - 0.70) / 0.15, 1);
+            subheadRef.current.style.opacity = String(t);
+            subheadRef.current.style.transform = `translateY(${30 - 30 * t}px)`;
+          } else {
+            subheadRef.current.style.opacity = "0";
+            subheadRef.current.style.transform = "translateY(30px)";
+          }
+        }
+
+        // Tagline: reveals 85% → 95%, rises from 20px to 0, fades 0→1
+        if (taglineRef.current) {
+          if (p >= 0.85) {
+            const t = Math.min((p - 0.85) / 0.10, 1);
+            taglineRef.current.style.opacity = String(t);
+            taglineRef.current.style.transform = `translateY(${20 - 20 * t}px)`;
+          } else {
+            taglineRef.current.style.opacity = "0";
+            taglineRef.current.style.transform = "translateY(20px)";
+          }
+        }
+
         // Fire onEnd at last frame (99.5% progress)
         if (safeIdx === FRAME_COUNT - 1 && clampedProgress >= 0.995) {
           onEndRef.current();
@@ -115,6 +157,48 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
     <div ref={sectionRef} className="hero">
       <h1 className="sr-only">Echofy: dub your video into any language</h1>
       <canvas ref={canvasRef} className="hero-canvas" aria-label="Echofy: a listener with headphones" role="img" />
+
+      {/* Scroll-reveal text layers */}
+      <div
+        ref={headlineRef}
+        className="hero-headline"
+        aria-hidden="true"
+        style={{
+          opacity: 0,
+          transform: "translateY(40px)",
+          transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
+        }}
+      >
+        <p className="hero-headline-label">Dub once.</p>
+        <h2 className="hero-headline-main">Be heard in every language.</h2>
+      </div>
+
+      <div
+        ref={subheadRef}
+        className="hero-subhead"
+        aria-hidden="true"
+        style={{
+          opacity: 0,
+          transform: "translateY(30px)",
+          transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
+        }}
+      >
+        <p>Your video. Every voice. Any language.</p>
+      </div>
+
+      <div
+        ref={taglineRef}
+        className="hero-tagline"
+        aria-hidden="true"
+        style={{
+          opacity: 0,
+          transform: "translateY(20px)",
+          transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
+        }}
+      >
+        <p>Original music preserved · Distinct voices · Studio quality</p>
+      </div>
+
       <p className="hero-tag" aria-hidden="true">Dub once. Be heard in every language.</p>
       <div ref={cueRef} className="hero-cue" aria-hidden="true">
         <span>Scroll</span>

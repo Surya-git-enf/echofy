@@ -19,9 +19,25 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
   const { nearest, loaded } = useImageSequence();
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
+  const [frameReady, setFrameReady] = useState(false);
+
+  // Wait for first frame to be actually drawable
+  useEffect(() => {
+    if (loaded) {
+      const checkFrame = () => {
+        const img = nearest(0);
+        if (img?.complete && img.naturalWidth > 0) {
+          setFrameReady(true);
+        } else {
+          requestAnimationFrame(checkFrame);
+        }
+      };
+      checkFrame();
+    }
+  }, [loaded, nearest]);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || !frameReady) return;
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
     let raf = 0;
@@ -36,7 +52,12 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
 
     const draw = () => {
       const img = nearest(frame.current);
-      if (!img || !img.complete || img.naturalWidth === 0) return;
+      if (!img || !img.complete || img.naturalWidth === 0) {
+        // Fallback: draw solid background while frame loads
+        ctx.fillStyle = "#f4f6fa";
+        ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+        return;
+      }
       const cw = window.innerWidth, ch = window.innerHeight;
       const iw = img.naturalWidth, ih = img.naturalHeight;
       if (cw < ch && iw > ih) {
@@ -74,6 +95,7 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       end: `+=${PIN_VH}%`,
       pin: true,
       pinSpacing: true,
+      pinReparent: true, // Ensure pinned element stays in correct stacking context
       scrub: true,
       anticipatePin: 1,
       onUpdate: (self) => {
@@ -89,7 +111,7 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
           const cueProgress = Math.max(0, 1 - clampedProgress / 0.93);
           cueRef.current.style.opacity = String(cueProgress);
         }
-        // Animate text reveal based on scroll progress
+        // Animate text reveal based on scroll progress (works both directions)
         const p = clampedProgress;
 
         // Headline: reveals 60% → 80%, rises from 40px to 0, fades 0→1
@@ -145,14 +167,29 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       cancelAnimationFrame(raf);
       trigger.kill();
     };
-  }, [loaded, nearest]);
+  }, [loaded, frameReady, nearest]);
+
+  // Render loading state until first frame is ready
+  if (!frameReady) {
+    return (
+      <div ref={sectionRef} className="hero" style={{ background: "#f4f6fa" }}>
+        <h1 className="sr-only">Echofy: dub your video into any language</h1>
+        <canvas ref={canvasRef} className="hero-canvas" aria-label="Echofy: a listener with headphones" role="img" style={{ background: "#f4f6fa" }} />
+        <p className="hero-tag" aria-hidden="true">Dub once. Be heard in every language.</p>
+        <div ref={cueRef} className="hero-cue" aria-hidden="true">
+          <span>Scroll</span>
+          <i />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div ref={sectionRef} className="hero">
+    <div ref={sectionRef} className="hero" style={{ zIndex: 10, position: "relative" }}>
       <h1 className="sr-only">Echofy: dub your video into any language</h1>
-      <canvas ref={canvasRef} className="hero-canvas" aria-label="Echofy: a listener with headphones" role="img" />
+      <canvas ref={canvasRef} className="hero-canvas" aria-label="Echofy: a listener with headphones" role="img" style={{ background: "#f4f6fa" }} />
 
-      {/* Scroll-reveal text layers */}
+      {/* Scroll-reveal text layers - higher z-index than Studio */}
       <div
         ref={headlineRef}
         className="hero-headline"
@@ -161,6 +198,8 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
           opacity: 0,
           transform: "translateY(40px)",
           transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
+          zIndex: 20,
+          position: "relative",
         }}
       >
         <p className="hero-headline-label">Dub once.</p>
@@ -175,6 +214,8 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
           opacity: 0,
           transform: "translateY(30px)",
           transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
+          zIndex: 20,
+          position: "relative",
         }}
       >
         <p>Your video. Every voice. Any language.</p>
@@ -188,6 +229,8 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
           opacity: 0,
           transform: "translateY(20px)",
           transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
+          zIndex: 20,
+          position: "relative",
         }}
       >
         <p>Original music preserved · Distinct voices · Studio quality</p>

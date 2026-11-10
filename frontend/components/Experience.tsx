@@ -18,7 +18,7 @@ export default function Experience() {
 
   return (
     <>
-      <main id="top">
+      <main id="top" style={{ position: "relative", zIndex: 1, background: "#f4f6fa", minHeight: "100vh" }}>
         <PageLoader />
         <Navbar />
         <HeroCanvas onEnd={onHeroEnd} />

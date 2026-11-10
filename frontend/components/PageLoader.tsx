@@ -5,9 +5,9 @@ import { LANGUAGE_VIDEO, PRELOAD_IMAGES, SHOWCASE_VIDEOS } from "@/lib/media";
 import { reportLoad, useLoadProgress } from "@/lib/loadProgress";
 import EqualizerLoader from "./EqualizerLoader";
 
-const GIVE_UP_MS = 12000; // never trap someone behind the loader on a slow connection
+const GIVE_UP_MS = 15000; // longer for mobile
 
-/** Reports images, fonts and video metadata to the progress store. */
+/** Preloads all non-frame assets: images, fonts, video metadata. */
 function usePreloadAssets() {
   useEffect(() => {
     let alive = true;
@@ -27,6 +27,7 @@ function usePreloadAssets() {
     const holders = sources.map((src) => {
       const v = document.createElement("video");
       v.preload = "metadata";
+      v.muted = true;
       const step = () => { videosDone++; if (alive) reportLoad("videos", videosDone / sources.length); };
       v.onloadedmetadata = v.onerror = step;
       v.src = src;
@@ -59,14 +60,14 @@ export default function PageLoader() {
     if (!finished) return;
     const t = window.setTimeout(() => {
       setGone(true);
-      ScrollTrigger.refresh(); // measure pinned sections now that the page is settled
+      ScrollTrigger.refresh();
     }, 500);
     return () => window.clearTimeout(t);
   }, [finished]);
 
   if (gone) return null;
   return (
-    <div className={`page-loader${finished ? " is-done" : ""}`}>
+    <div className={`page-loader${finished ? " is-done" : ""}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
       <EqualizerLoader progress={progress} caption={`Loading ${Math.round(progress * 100)}%`} />
     </div>
   );

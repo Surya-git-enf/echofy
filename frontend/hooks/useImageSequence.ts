@@ -3,43 +3,63 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { reportLoad } from "@/lib/loadProgress";
 import { FRAME_COUNT, FRAMES_DIR, MOBILE_FRAMES_DIR, frameSrc } from "@/lib/media";
 
-const FIRST_BATCH = 50;
+const FIRST_BATCH = 30; // Reduced for faster initial load
+const MOBILE_FIRST_BATCH = 20;
 
 /**
- * Loads the hero frames in two stages: the first 100 block the page loader, the rest
- * stream in behind it. `nearest(i)` returns the closest already-loaded frame at or
- * before i, so scrolling fast never shows a blank canvas.
+ * Loads hero frames in two stages with mobile/desktop awareness.
+ * Reports progress to PageLoader for unified loading UX.
+ * `nearest(i)` returns closest loaded frame at/before i — no blank canvas on fast scroll.
  */
 export function useImageSequence() {
   const images = useRef<(HTMLImageElement | null)[]>(new Array(FRAME_COUNT).fill(null));
   const [loaded, setLoaded] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [allLoaded, setAllLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     let done = 0;
-    const dir = MOBILE_FRAMES_DIR && window.innerWidth < window.innerHeight ? MOBILE_FRAMES_DIR : FRAMES_DIR;
+    const isMobile = window.innerWidth < window.innerHeight;
+    const dir = MOBILE_FRAMES_DIR && isMobile ? MOBILE_FRAMES_DIR : FRAMES_DIR;
+    const batchSize = isMobile ? MOBILE_FIRST_BATCH : FIRST_BATCH;
 
     const load = (i: number) =>
       new Promise<void>((resolve) => {
         const img = new Image();
         img.decoding = "async";
+        img.fetchPriority = i < batchSize ? "high" : "low";
         img.onload = img.onerror = () => {
           if (img.naturalWidth > 0) images.current[i] = img;
           done++;
-          if (!cancelled && done <= FIRST_BATCH) { setProgress(done / FIRST_BATCH); reportLoad("frames", done / FIRST_BATCH); }
+          if (!cancelled && done <= batchSize) {
+            const p = done / batchSize;
+            setProgress(p);
+            reportLoad("frames", p);
+          }
           resolve();
         };
         img.src = frameSrc(i, dir);
       });
 
     (async () => {
-      await Promise.all(Array.from({ length: FIRST_BATCH }, (_, i) => load(i)));
+      // Stage 1: Priority frames (block PageLoader)
+      await Promise.all(Array.from({ length: batchSize }, (_, i) => load(i)));
       if (cancelled) return;
       setLoaded(true);
-      for (let i = FIRST_BATCH; i < FRAME_COUNT && !cancelled; i += 6) {
-        await Promise.all(Array.from({ length: Math.min(6, FRAME_COUNT - i) }, (_, k) => load(i + k)));
+
+      // Stage 2: Remaining frames (background)
+      for (let i = batchSize; i < FRAME_COUNT && !cancelled; i += 6) {
+        await Promise.all(
+          Array.from({ length: Math.min(6, FRAME_COUNT - i) }, (_, k) => load(i + k))
+        );
+        // Report total progress for all-frames-ready
+        if (!cancelled) {
+          const totalProgress = Math.min(1, done / FRAME_COUNT);
+          reportLoad("frames", totalProgress);
+        }
       }
+      if (!cancelled) setAllLoaded(true);
     })();
 
     return () => { cancelled = true; };
@@ -48,10 +68,10 @@ export function useImageSequence() {
   const nearest = useCallback((index: number): HTMLImageElement | null => {
     for (let i = Math.min(index, FRAME_COUNT - 1); i >= 0; i--) {
       const img = images.current[i];
-      if (img) return img;
+      if (img?.complete && img.naturalWidth > 0) return img;
     }
     return null;
   }, []);
 
-  return { nearest, loaded, progress };
+  return { nearest, loaded, progress, allLoaded };
 }

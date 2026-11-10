@@ -442,6 +442,7 @@ def test_adapt_dialogue_sends_the_transcript_and_audio_to_gemini():
     assert 'id=0  1.5s  max 4 words  (span 0.5 to 2.0)  "Hi, is this seat taken?"' in prompt
     assert "Telugu" in prompt and not re.search(r"\{[a-z_]+\}", prompt)  # no unfilled template fields
     assert "NAMES NEVER CHANGE" in prompt and "<whispers>" in prompt and "<angry>" not in prompt
+    assert "timbre-v3.0" in prompt and "in the middle of a sentence" in prompt
     assert seen["contents"][1] == "uploaded" and seen["audio"] == "a.wav"
     assert seen["config"]["system_instruction"] == gemini_service.DIALOGUE_SYSTEM_INSTRUCTION
     assert [s["translated_text"] for s in out["segments"]] == ["line 0", "line 1", "line 2"]

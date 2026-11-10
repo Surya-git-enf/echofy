@@ -90,7 +90,13 @@ Any other language (French, Japanese, …) is rejected for `gnani` with a hint t
 
 ### Emotion through Vachana's inline audio tags
 
-Gemini labels every line with an emotion and may add bracket cues such as `[laughing]`. [`gnani_prepare()`](tts_service.py) turns those into the tags `timbre-v3.0` understands and picks a speaking speed.
+Every line is spoken by **`timbre-v3.0`**, the Vachana model that reads inline tags anywhere in the text: at the start, mid-sentence, and inside mixed native-script and English lines. The Gemini prompt names the model and asks for exactly that style, writing the angle-bracket tags itself, for example:
+
+```text
+<exhales> నీ birthday కి <pauses> నిజంగానే వస్తావా?
+```
+
+Here `<exhales>` colours the opening, `<pauses>` marks a real hesitation, and the English word stays English. The line is sent with `language: "auto"` because it mixes scripts. [`clean_audio_tags()`](tts_service.py) keeps only the 13 valid tags, and [`gnani_prepare()`](tts_service.py) adds an emotion tag when the line has none and picks a speaking speed. Older bracket cues such as `[laughing]` are still converted.
 
 | Gemini emotion | Tag added to the start of the line | Speed |
 |---|---|---|

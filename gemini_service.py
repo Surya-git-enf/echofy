@@ -284,8 +284,10 @@ THE RULES (in order of importance)
    it's okay, and everyday loanwords such as dad, mom, phone, cancer, boss, party. Write the rest of the line in
    {target_language} in its normal script. If the whole line is such a phrase, keep the whole line. (If the target
    language is English, just adapt tone and wording.)
-3. TAGS. You may use only these tags, in angle brackets, lower case: {tag_list}. Put a tag directly before the words
-   it colours. Use them where the face and voice really show it: <whispers> for a hushed voice, <shouting> for a raised
+3. TAGS. Every line is spoken by Gnani Vachana timbre-v3.0, which reads inline tags anywhere in a line: at the start,
+   in the middle of a sentence, and in mixed Telugu/Hindi and English text. For example:
+   "<exhales> నీ birthday కి <pauses> నిజంగానే వస్తావా?". You may use only these tags, in angle brackets, lower case:
+   {tag_list}. Put a tag directly before the words it colours. Use them where the face and voice really show it: <whispers> for a hushed voice, <shouting> for a raised
    one, <sniffles> when crying, <pauses> at a real hesitation, <slow> for tender or halting speech, <sigh>, <giggle>,
    <laugh>, <exhales> and so on. Most lines need one tag or none. Any other tag is ignored.
 4. EVERY LINE NEEDS SPOKEN WORDS. A line that is only tags, only a sound or only punctuation is not allowed and is

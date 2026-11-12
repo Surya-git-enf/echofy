@@ -12,6 +12,7 @@ export const LANGUAGES = [
   { key: "bengali", label: "Bengali", native: "বাংলা", lang: "bn" },
   { key: "gujarati", label: "Gujarati", native: "ગુજરાતી", lang: "gu" },
   { key: "punjabi", label: "Punjabi", native: "ਪੰਜਾਬੀ", lang: "pa" },
+  { key: "hinglish", label: "Hinglish", native: "Hinglish", lang: "hi" },
   { key: "english", label: "English", native: "English", lang: "en" },
 ];
 

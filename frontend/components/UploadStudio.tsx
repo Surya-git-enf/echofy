@@ -34,6 +34,20 @@ const loadJob = (): SavedJob | null => {
 };
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
+/** Saves the dub to the device. Falls back to opening the file when the browser blocks the fetch. */
+async function saveVideo(url: string, source: string) {
+  const name = `${source.replace(/\.[^.]+$/, "") || "video"}-dubbed.mp4`;
+  try {
+    const blob = await (await fetch(url)).blob();
+    const href = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement("a"), { href, download: name });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 10000);
+  } catch {
+    window.open(url, "_blank", "noopener");
+  }
+}
+
 export default function UploadStudio() {
   const credits = useCredits();
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -137,6 +151,7 @@ export default function UploadStudio() {
             <p className="file" title={phase.file.name}>{phase.file.name}</p>
             <p className="note">{fmtTime(phase.seconds)} long · {(phase.file.size / 1048576).toFixed(1)} MB</p>
             <LanguageSelect value={language} onChange={setLanguage} disabled={short} />
+            <p className="note">Speakers are detected automatically, and each gets their own voice.</p>
             <button type="button" className="btn-grad" onClick={start} disabled={short}>let&rsquo;s dub it</button>
             <p className="note">
               {short
@@ -149,7 +164,7 @@ export default function UploadStudio() {
 
         {busy && (
           <div className="busy">
-            <EqualizerLoader phrases={PHRASES} progress={pct / 100} />
+            <EqualizerLoader phrases={PHRASES} progress={pct / 100} showPercent />
             <p className="note" role="status">{stageText}</p>
           </div>
         )}
@@ -175,7 +190,7 @@ export default function UploadStudio() {
         <div className="output">
           <h2 className="grad-title">Here it is</h2>
           <video src={phase.url} controls playsInline className="output-video" />
-          <a className="btn-grad" href={phase.url} download>Download video</a>
+          <button type="button" className="btn-grad" onClick={() => saveVideo(phase.url, phase.name)}>Download video</button>
         </div>
       )}
     </section>

@@ -3,14 +3,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { reportLoad } from "@/lib/loadProgress";
 import { FRAME_COUNT, FRAMES_DIR, MOBILE_FRAMES_DIR, frameSrc } from "@/lib/media";
 
-const FIRST_BATCH = 30;
-const MOBILE_FIRST_BATCH = 20;
+const PARALLEL = 8;
+const COARSE_STEP = 4; // every 4th frame loads first, so a fast scroll never lands on a gap
 
 /**
- * Loads hero frames in two stages:
- * - Stage 1 (priority): first 30/20 frames — blocks PageLoader, reports "frames" progress 0→1
- * - Stage 2 (background): remaining frames — loads silently, does NOT block PageLoader
- * `nearest(i)` returns closest loaded frame at/before i — no blank canvas on fast scroll.
+ * Loads every hero frame. The page loader waits for the full set: `reportLoad("frames", p)`
+ * climbs from 0 to 1 across all frames, not just the first batch.
+ * Frames load coarse-first (every 4th, then the rest). `nearest(i)` returns the closest
+ * loaded frame at or before i, so the canvas is never blank while the rest arrive.
+ * `loaded` turns true once the coarse set is in, so the hero can start if the loader gives up.
  */
 export function useImageSequence() {
   const images = useRef<(HTMLImageElement | null)[]>(new Array(FRAME_COUNT).fill(null));
@@ -19,44 +20,39 @@ export function useImageSequence() {
 
   useEffect(() => {
     let cancelled = false;
-    let done = 0;
     const isMobile = window.innerWidth < window.innerHeight;
     const dir = MOBILE_FRAMES_DIR && isMobile ? MOBILE_FRAMES_DIR : FRAMES_DIR;
-    const batchSize = isMobile ? MOBILE_FIRST_BATCH : FIRST_BATCH;
+
+    const order: number[] = [];
+    for (let i = 0; i < FRAME_COUNT; i += COARSE_STEP) order.push(i);
+    const coarse = order.length;
+    for (let i = 0; i < FRAME_COUNT; i++) if (i % COARSE_STEP) order.push(i);
+
+    let next = 0;
+    let done = 0;
 
     const load = (i: number) =>
       new Promise<void>((resolve) => {
         const img = new Image();
         img.decoding = "async";
-        img.fetchPriority = i < batchSize ? "high" : "low";
         img.onload = img.onerror = () => {
           if (img.naturalWidth > 0) images.current[i] = img;
           done++;
-          if (!cancelled && done <= batchSize) {
-            const p = done / batchSize;
+          if (!cancelled) {
+            const p = done / FRAME_COUNT;
             setProgress(p);
-            reportLoad("frames", p); // PageLoader waits for this to reach 1
+            reportLoad("frames", p);
+            if (done === coarse) setLoaded(true);
           }
           resolve();
         };
         img.src = frameSrc(i, dir);
       });
 
-    (async () => {
-      // Stage 1: Priority frames (blocks PageLoader)
-      await Promise.all(Array.from({ length: batchSize }, (_, i) => load(i)));
-      if (cancelled) return;
-      setLoaded(true);
-      setProgress(1);
-      reportLoad("frames", 1); // Critical frames done → PageLoader can proceed
-
-      // Stage 2: Remaining frames (background, no PageLoader blocking)
-      for (let i = batchSize; i < FRAME_COUNT && !cancelled; i += 6) {
-        await Promise.all(
-          Array.from({ length: Math.min(6, FRAME_COUNT - i) }, (_, k) => load(i + k))
-        );
-      }
-    })();
+    const worker = async () => {
+      while (!cancelled && next < order.length) await load(order[next++]);
+    };
+    Promise.all(Array.from({ length: PARALLEL }, worker));
 
     return () => { cancelled = true; };
   }, []);

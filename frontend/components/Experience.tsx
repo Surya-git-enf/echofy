@@ -1,6 +1,8 @@
 "use client";
 import { useCallback, useRef, useState } from "react";
 import { welcomeSeen } from "@/lib/credits";
+import SmoothScroll from "./SmoothScroll";
+import RiseOnScroll from "./RiseOnScroll";
 import PageLoader from "./PageLoader";
 import Navbar from "./Navbar";
 import HeroCanvas from "./HeroCanvas";
@@ -19,6 +21,8 @@ export default function Experience() {
   return (
     <>
       <main id="top" style={{ position: "relative", zIndex: 1, background: "#f4f6fa", minHeight: "100vh" }}>
+        <SmoothScroll />
+        <RiseOnScroll />
         <PageLoader />
         <Navbar />
         <HeroCanvas onEnd={onHeroEnd} />

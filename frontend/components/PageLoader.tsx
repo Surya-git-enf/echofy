@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { LANGUAGE_VIDEO, PRELOAD_IMAGES, SHOWCASE_VIDEOS } from "@/lib/media";
 import { reportLoad, useLoadProgress } from "@/lib/loadProgress";
+import { setScrollLocked } from "@/lib/smoothScroll";
 import EqualizerLoader from "./EqualizerLoader";
 
-const GIVE_UP_MS = 15000; // longer for mobile
+const GIVE_UP_MS = 30000; // slow connections: show the page anyway after this long
 
 /** Preloads all non-frame assets: images, fonts, video metadata. */
 function usePreloadAssets() {
@@ -49,14 +50,13 @@ export default function PageLoader() {
     return () => window.clearTimeout(t);
   }, []);
 
-  // Frames (70%) + assets (20%) + videos (10%) = 1.0
-  // But frames reaches 1.0 after first batch (30 frames)
-  // So we only need ~0.95 to be safe (allows small delays in assets/videos)
-  const finished = progress >= 0.95 || leaving;
+  // Frames (70%) + assets (20%) + videos (10%): the page opens when all of it has arrived.
+  const finished = progress >= 0.999 || leaving;
 
   useEffect(() => {
     document.documentElement.style.overflow = gone ? "" : "hidden";
-    return () => { document.documentElement.style.overflow = ""; };
+    setScrollLocked(!gone);
+    return () => { document.documentElement.style.overflow = ""; setScrollLocked(false); };
   }, [gone]);
 
   useEffect(() => {
@@ -71,7 +71,7 @@ export default function PageLoader() {
   if (gone) return null;
   return (
     <div className={`page-loader${finished ? " is-done" : ""}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
-      <EqualizerLoader progress={progress} />
+      <EqualizerLoader progress={progress} showPercent />
     </div>
   );
 }

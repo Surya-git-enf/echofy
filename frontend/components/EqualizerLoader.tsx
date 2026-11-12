@@ -7,7 +7,7 @@ const PILLS = 25;
  * Equalizer loader. With `progress` (0..1) each pill turns solid black in turn, so the bar
  * reads as a real progress meter. Without it the pills just pulse at half opacity.
  */
-export default function EqualizerLoader({ progress, phrases, caption }: { progress?: number; phrases?: string[]; caption?: string }) {
+export default function EqualizerLoader({ progress, phrases, caption, showPercent }: { progress?: number; phrases?: string[]; caption?: string; showPercent?: boolean }) {
   const [i, setI] = useState(0);
 
   useEffect(() => {
@@ -43,6 +43,9 @@ export default function EqualizerLoader({ progress, phrases, caption }: { progre
           );
         })}
       </div>
+      {showPercent && progress !== undefined && (
+        <p className="eql-pct" aria-hidden="true">{Math.round(Math.min(1, Math.max(0, progress)) * 100)}%</p>
+      )}
       <p className="eql-phrase" key={i} aria-live="polite">{phrases ? phrases[i] : caption}</p>
     </div>
   );

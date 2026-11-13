@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useImageSequence } from "@/hooks/useImageSequence";
@@ -7,87 +7,111 @@ import { FRAME_COUNT } from "@/lib/media";
 
 gsap.registerPlugin(ScrollTrigger);
 
+const PIN_VH = 400;       // scroll distance the hero is pinned for
+const FOLLOW = 9;         // how quickly the picture chases the scroll position (higher = snappier)
+const BG = "#f4f6fa";
+
+// Text layers reveal over a slice of the scroll: [start, end, rise in px]
+const LAYERS = [
+  { key: "headline", from: 0.6, to: 0.8, rise: 40 },
+  { key: "subhead", from: 0.7, to: 0.85, rise: 30 },
+  { key: "tagline", from: 0.85, to: 0.95, rise: 20 },
+] as const;
+
 export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
   const sectionRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cueRef = useRef<HTMLDivElement>(null);
-  const headlineRef = useRef<HTMLDivElement>(null);
-  const subheadRef = useRef<HTMLDivElement>(null);
-  const taglineRef = useRef<HTMLDivElement>(null);
-  const frame = useRef(0);
-  const dirty = useRef(true);
+  const layerRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const { nearest, loaded } = useImageSequence();
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
-  const [frameReady, setFrameReady] = useState(false);
-
-  // Wait for first frame to be actually drawable
-  useEffect(() => {
-    if (loaded) {
-      const checkFrame = () => {
-        const img = nearest(0);
-        if (img?.complete && img.naturalWidth > 0) {
-          setFrameReady(true);
-        } else {
-          requestAnimationFrame(checkFrame);
-        }
-      };
-      checkFrame();
-    }
-  }, [loaded, nearest]);
 
   useEffect(() => {
-    if (!loaded || !frameReady) return;
+    if (!loaded) return;
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    let target = 0;   // frame position the scroll is asking for (fractional)
+    let current = 0;  // frame position on screen, eased towards target
+    let drawn = -1;
+    let ended = false;
     let raf = 0;
+    let last = performance.now();
 
     const size = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = window.innerWidth * dpr;
-      canvas.height = window.innerHeight * dpr;
+      canvas.width = Math.round(window.innerWidth * dpr);
+      canvas.height = Math.round(window.innerHeight * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      dirty.current = true;
+      drawn = -1;
     };
 
-    const draw = () => {
-      const img = nearest(frame.current);
-      if (!img || !img.complete || img.naturalWidth === 0) {
-        // Fallback: draw solid background while frame loads
-        ctx.fillStyle = "#f4f6fa";
-        ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
-        return;
-      }
+    const paint = (img: HTMLImageElement, alpha: number) => {
       const cw = window.innerWidth, ch = window.innerHeight;
       const iw = img.naturalWidth, ih = img.naturalHeight;
+      ctx.globalAlpha = alpha;
       if (cw < ch && iw > ih) {
-        // Portrait: show full frame at bottom with blurred top extension
+        // Portrait: whole frame at the bottom, its top edge blurred upwards to fill the screen.
         const dh = (ih * cw) / iw, y = ch - dh;
         ctx.save();
         ctx.filter = "blur(10px)";
         ctx.drawImage(img, 0, 0, iw, 2, -20, -20, cw + 40, y + 22);
         ctx.restore();
         ctx.drawImage(img, 0, y, cw, dh);
-        return;
+      } else {
+        const scale = Math.max(cw / iw, ch / ih);
+        const dw = iw * scale, dh = ih * scale;
+        ctx.drawImage(img, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
       }
-      const scale = Math.max(cw / iw, ch / ih);
-      const dw = iw * scale, dh = ih * scale;
-      ctx.drawImage(img, (cw - dw) / 2, (ch - dh) / 2, dw, dh);
+      ctx.globalAlpha = 1;
     };
 
-    const loop = () => {
-      if (dirty.current) { draw(); dirty.current = false; }
+    // Draws a position between two frames by cross-fading them, so slow scrolling glides
+    // instead of stepping from one picture to the next.
+    const draw = (pos: number) => {
+      const a = Math.floor(pos);
+      const t = pos - a;
+      const imgA = nearest(a);
+      ctx.fillStyle = BG;
+      ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+      if (!imgA) return;
+      paint(imgA, 1);
+      if (t > 0.02 && a + 1 < FRAME_COUNT) {
+        const imgB = nearest(a + 1);
+        if (imgB && imgB !== imgA) paint(imgB, t);
+      }
+    };
+
+    const reveal = (p: number) => {
+      LAYERS.forEach(({ key, from, to, rise }) => {
+        const el = layerRefs.current[key];
+        if (!el) return;
+        const t = Math.min(1, Math.max(0, (p - from) / (to - from)));
+        const e = 1 - Math.pow(1 - t, 3);
+        el.style.opacity = String(e);
+        el.style.transform = `translate3d(0, ${((1 - e) * rise).toFixed(1)}px, 0)`;
+      });
+      if (cueRef.current) cueRef.current.style.opacity = String(Math.max(0, 1 - p / 0.93));
+    };
+
+    const loop = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const gap = target - current;
+      current = reduced || Math.abs(gap) < 0.002 ? target : current + gap * (1 - Math.exp(-FOLLOW * dt));
+      if (current !== drawn) {
+        draw(current);
+        reveal(current / (FRAME_COUNT - 1));
+        drawn = current;
+      }
       raf = requestAnimationFrame(loop);
     };
 
-    // Draw frame 0 immediately
     size();
-    draw();
+    reveal(0);
     raf = requestAnimationFrame(loop);
-
-    // Pin distance: 400vh for 300 frames = smooth Apple feel
-    // pinSpacing: true creates spacer below pin → next section (Studio) sits in that space
-    const PIN_VH = 400;
 
     const trigger = ScrollTrigger.create({
       trigger: sectionRef.current,
@@ -95,145 +119,48 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
       end: `+=${PIN_VH}%`,
       pin: true,
       pinSpacing: true,
-      pinReparent: true, // Ensure pinned element stays in correct stacking context
       scrub: true,
       anticipatePin: 1,
+      refreshPriority: 2, // measured before the sections below, which sit in this pin's spacer
       onUpdate: (self) => {
-        const clampedProgress = Math.max(0, Math.min(1, self.progress));
-        const idx = Math.floor(clampedProgress * FRAME_COUNT);
-        const safeIdx = Math.max(0, Math.min(FRAME_COUNT - 1, idx));
-        if (safeIdx !== frame.current) {
-          frame.current = safeIdx;
-          dirty.current = true;
-        }
-        // Fade out scroll cue by ~93% progress
-        if (cueRef.current) {
-          const cueProgress = Math.max(0, 1 - clampedProgress / 0.93);
-          cueRef.current.style.opacity = String(cueProgress);
-        }
-        // Animate text reveal based on scroll progress (works both directions)
-        const p = clampedProgress;
-
-        // Headline: reveals 60% → 80%, rises from 40px to 0, fades 0→1
-        if (headlineRef.current) {
-          if (p >= 0.60) {
-            const t = Math.min((p - 0.60) / 0.20, 1);
-            headlineRef.current.style.opacity = String(t);
-            headlineRef.current.style.transform = `translateY(${40 - 40 * t}px)`;
-          } else {
-            headlineRef.current.style.opacity = "0";
-            headlineRef.current.style.transform = "translateY(40px)";
-          }
-        }
-
-        // Subhead: reveals 70% → 85%, rises from 30px to 0, fades 0→1
-        if (subheadRef.current) {
-          if (p >= 0.70) {
-            const t = Math.min((p - 0.70) / 0.15, 1);
-            subheadRef.current.style.opacity = String(t);
-            subheadRef.current.style.transform = `translateY(${30 - 30 * t}px)`;
-          } else {
-            subheadRef.current.style.opacity = "0";
-            subheadRef.current.style.transform = "translateY(30px)";
-          }
-        }
-
-        // Tagline: reveals 85% → 95%, rises from 20px to 0, fades 0→1
-        if (taglineRef.current) {
-          if (p >= 0.85) {
-            const t = Math.min((p - 0.85) / 0.10, 1);
-            taglineRef.current.style.opacity = String(t);
-            taglineRef.current.style.transform = `translateY(${20 - 20 * t}px)`;
-          } else {
-            taglineRef.current.style.opacity = "0";
-            taglineRef.current.style.transform = "translateY(20px)";
-          }
-        }
-
-        // Fire onEnd at last frame (99.5% progress)
-        if (safeIdx === FRAME_COUNT - 1 && clampedProgress >= 0.995) {
-          onEndRef.current();
-        }
-      },
-      onLeave: () => {
-        // Pin released - normal scroll resumes
+        const p = Math.max(0, Math.min(1, self.progress));
+        target = p * (FRAME_COUNT - 1);
+        if (!ended && p >= 0.995) { ended = true; onEndRef.current(); }
       },
     });
 
-    const onResize = () => { size(); ScrollTrigger.refresh(); };
-    window.addEventListener("resize", onResize);
+    window.addEventListener("resize", size);
     return () => {
-      window.removeEventListener("resize", onResize);
+      window.removeEventListener("resize", size);
       cancelAnimationFrame(raf);
-      trigger.kill();
+      trigger.kill(true);
     };
-  }, [loaded, frameReady, nearest]);
+  }, [loaded, nearest]);
 
-  // Render loading state until first frame is ready
-  if (!frameReady) {
-    return (
-      <div ref={sectionRef} className="hero" style={{ background: "#f4f6fa" }}>
-        <h1 className="sr-only">Echofy: dub your video into any language</h1>
-        <canvas ref={canvasRef} className="hero-canvas" aria-label="Echofy: a listener with headphones" role="img" style={{ background: "#f4f6fa" }} />
-        <p className="hero-tag" aria-hidden="true">Dub once. Be heard in every language.</p>
-        <div ref={cueRef} className="hero-cue" aria-hidden="true">
-          <span>Scroll</span>
-          <i />
-        </div>
-      </div>
-    );
-  }
+  const setLayer = (key: string) => (el: HTMLDivElement | null) => { layerRefs.current[key] = el; };
 
   return (
-    <div ref={sectionRef} className="hero" style={{ zIndex: 10, position: "relative" }}>
+    <div ref={sectionRef} className="hero">
       <h1 className="sr-only">Echofy: dub your video into any language</h1>
-      <canvas ref={canvasRef} className="hero-canvas" aria-label="Echofy: a listener with headphones" role="img" style={{ background: "#f4f6fa" }} />
+      <canvas ref={canvasRef} className="hero-canvas" aria-label="Echofy: a listener with headphones" role="img" />
 
-      {/* Scroll-reveal text layers - higher z-index than Studio */}
-      <div
-        ref={headlineRef}
-        className="hero-headline"
-        aria-hidden="true"
-        style={{
-          opacity: 0,
-          transform: "translateY(40px)",
-          transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
-          zIndex: 20,
-          position: "relative",
-        }}
-      >
-        <p className="hero-headline-label">Dub once.</p>
-        <h2 className="hero-headline-main">Be heard in every language.</h2>
-      </div>
-
-      <div
-        ref={subheadRef}
-        className="hero-subhead"
-        aria-hidden="true"
-        style={{
-          opacity: 0,
-          transform: "translateY(30px)",
-          transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
-          zIndex: 20,
-          position: "relative",
-        }}
-      >
-        <p>Your video. Every voice. Any language.</p>
-      </div>
-
-      <div
-        ref={taglineRef}
-        className="hero-tagline"
-        aria-hidden="true"
-        style={{
-          opacity: 0,
-          transform: "translateY(20px)",
-          transition: "opacity 0.4s ease-out, transform 0.4s ease-out",
-          zIndex: 20,
-          position: "relative",
-        }}
-      >
-        <p>Original music preserved · Distinct voices · Studio quality</p>
+      <div className="hero-copy" aria-hidden="true">
+        <div className="hero-headline">
+          <div ref={setLayer("headline")} className="hero-rise">
+            <p className="hero-headline-label">Dub once.</p>
+            <h2 className="hero-headline-main">Be heard in every language.</h2>
+          </div>
+        </div>
+        <div className="hero-subhead">
+          <div ref={setLayer("subhead")} className="hero-rise">
+            <p>Your video. Every voice. Any language.</p>
+          </div>
+        </div>
+        <div className="hero-tagline">
+          <div ref={setLayer("tagline")} className="hero-rise">
+            <p>Original music preserved · Distinct voices · Studio quality</p>
+          </div>
+        </div>
       </div>
 
       <p className="hero-tag" aria-hidden="true">Dub once. Be heard in every language.</p>

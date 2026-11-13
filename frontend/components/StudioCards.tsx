@@ -4,6 +4,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import { LANGUAGE_VIDEO } from "@/lib/media";
+import { useNearViewport } from "@/hooks/useNearViewport";
 import SoundToggle from "./SoundToggle";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -13,6 +14,8 @@ export default function StudioCards() {
   const pin = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
   const langVideo = useRef<HTMLVideoElement>(null);
+
+  const near = useNearViewport(root);
 
   useGSAP(
     () => {
@@ -25,30 +28,39 @@ export default function StudioCards() {
         // Pin the section and slide the cards sideways as the page scrolls.
         section.classList.add("is-pinned");
         const travel = () => strip.scrollWidth - window.innerWidth;
-        const slide = gsap.to(strip, {
+        const cards = gsap.utils.toArray<HTMLElement>(".studio-card", section);
+
+        // A card is upright when its centre is mid-screen and swings away as it moves off either side.
+        // Driven by where the card actually is, so nothing moves until the pinned scroll begins.
+        const swing = () => {
+          const mid = window.innerWidth / 2;
+          cards.forEach((card) => {
+            const box = card.getBoundingClientRect();
+            const d = Math.max(-1, Math.min(1, (box.left + box.width / 2 - mid) / box.width));
+            const e = Math.abs(d);
+            const eased = e * e * (3 - 2 * e);
+            gsap.set(card.querySelector(".tilt"), { rotation: 40 * eased, y: 150 * eased });
+            const pop = card.querySelector(".pop");
+            if (pop) gsap.set(pop, { y: 30 * d });
+          });
+        };
+
+        gsap.to(strip, {
           x: () => -travel(),
           ease: "none",
+          onUpdate: swing,
           scrollTrigger: {
             trigger: pin.current,
             pin: true,
-            scrub: 1,
+            scrub: 1.2,
             anticipatePin: 1,
+            refreshPriority: 1,
             end: () => "+=" + travel(),
             invalidateOnRefresh: true,
+            onRefresh: swing,
           },
         });
-
-        // Each card swings in from 40 degrees, settles upright in the middle of the screen, then swings out.
-        gsap.utils.toArray<HTMLElement>(".studio-card", section).forEach((card) => {
-          const range = { trigger: card, containerAnimation: slide, start: "left right", end: "right left" };
-          gsap
-            .timeline({ scrollTrigger: { ...range, scrub: 1 } })
-            .fromTo(card.querySelector(".tilt"), { rotation: 40, y: 150 }, { rotation: 0, y: 0, duration: 2, ease: "power2.out" })
-            .to(card.querySelector(".tilt"), { rotation: 40, y: 150, duration: 2, ease: "power2.in" });
-
-          const pop = card.querySelector(".pop");
-          if (pop) gsap.fromTo(pop, { y: 30 }, { y: -30, ease: "none", scrollTrigger: { ...range, scrub: true } });
-        });
+        swing();
 
         return () => section.classList.remove("is-pinned");
       });
@@ -72,7 +84,7 @@ export default function StudioCards() {
           <article className="studio-card">
             <div className="tilt card card-lang">
               <div className="card-bg">
-                <video ref={langVideo} src={LANGUAGE_VIDEO} autoPlay muted loop playsInline preload="metadata" />
+                <video ref={langVideo} src={near ? LANGUAGE_VIDEO : undefined} autoPlay muted loop playsInline preload="metadata" />
               </div>
               <SoundToggle videoRef={langVideo} />
               <h3 className="lang-title">Language Vibes</h3>

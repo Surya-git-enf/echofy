@@ -1,14 +1,14 @@
 "use client";
 import { useEffect, useState } from "react";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { LANGUAGE_VIDEO, PRELOAD_IMAGES, SHOWCASE_VIDEOS } from "@/lib/media";
+import { PRELOAD_IMAGES } from "@/lib/media";
 import { reportLoad, useLoadProgress } from "@/lib/loadProgress";
 import { setScrollLocked } from "@/lib/smoothScroll";
 import EqualizerLoader from "./EqualizerLoader";
 
 const GIVE_UP_MS = 30000; // slow connections: show the page anyway after this long
 
-/** Preloads all non-frame assets: images, fonts, video metadata. */
+/** Preloads all non-frame assets: images and fonts. */
 function usePreloadAssets() {
   useEffect(() => {
     let alive = true;
@@ -23,19 +23,10 @@ function usePreloadAssets() {
     });
     (document.fonts ? document.fonts.ready : Promise.resolve()).then(assetStep, assetStep);
 
-    const sources = Array.from(new Set([LANGUAGE_VIDEO, ...SHOWCASE_VIDEOS.map((v) => v.src)]));
-    let videosDone = 0;
-    const holders = sources.map((src) => {
-      const v = document.createElement("video");
-      v.preload = "metadata";
-      v.muted = true;
-      const step = () => { videosDone++; if (alive) reportLoad("videos", videosDone / sources.length); };
-      v.onloadedmetadata = v.onerror = step;
-      v.src = src;
-      return v;
-    });
+    // Videos stream in lazily as their sections near the screen, so the loader never waits on them.
+    reportLoad("videos", 1);
 
-    return () => { alive = false; holders.forEach((v) => { v.removeAttribute("src"); v.load(); }); };
+    return () => { alive = false; };
   }, []);
 }
 

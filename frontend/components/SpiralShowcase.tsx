@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { SHOWCASE_VIDEOS } from "@/lib/media";
+import { useNearViewport } from "@/hooks/useNearViewport";
 import SoundToggle from "./SoundToggle";
 
 const STEP = 360 / SHOWCASE_VIDEOS.length;
@@ -11,9 +12,10 @@ type ReelProps = {
   radius: number;
   moved: React.RefObject<number>;
   onHover: (on: boolean) => void;
+  armed: boolean;
 };
 
-function Reel({ video, index, radius, moved, onHover }: ReelProps) {
+function Reel({ video, index, radius, moved, onHover, armed }: ReelProps) {
   const ref = useRef<HTMLVideoElement>(null);
 
   const enter = (e: React.PointerEvent) => {
@@ -42,7 +44,7 @@ function Reel({ video, index, radius, moved, onHover }: ReelProps) {
       onPointerLeave={leave}
       onClick={click}
     >
-      <video ref={ref} src={video.src} muted loop playsInline preload="metadata" aria-label={video.label} />
+      <video ref={ref} src={armed ? video.src : undefined} muted loop playsInline preload="metadata" aria-label={video.label} />
       <SoundToggle videoRef={ref} />
     </div>
   );
@@ -55,6 +57,8 @@ export default function SpiralShowcase() {
   const dragging = useRef(false);
   const lastX = useRef(0);
   const moved = useRef(0);
+  const section = useRef<HTMLElement>(null);
+  const armed = useNearViewport(section);
   const [radius, setRadius] = useState(300);
 
   useEffect(() => {
@@ -88,7 +92,7 @@ export default function SpiralShowcase() {
   }, [radius]);
 
   return (
-    <section className="showcase" id="showcase">
+    <section ref={section} className="showcase" id="showcase">
       <h2 className="section-title">Hear the difference</h2>
       <p className="showcase-note">Hover or tap a video to play it. Tap the speaker for sound. Drag to spin.</p>
       <div
@@ -106,7 +110,7 @@ export default function SpiralShowcase() {
       >
         <div ref={ring} className="orbit-ring">
           {SHOWCASE_VIDEOS.map((v, i) => (
-            <Reel key={v.id} video={v} index={i} radius={radius} moved={moved} onHover={(on) => { hovering.current = on; }} />
+            <Reel key={v.id} video={v} index={i} radius={radius} moved={moved} armed={armed} onHover={(on) => { hovering.current = on; }} />
           ))}
         </div>
       </div>

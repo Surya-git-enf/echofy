@@ -98,34 +98,13 @@ button, select { font: inherit; }
 .hero { position: relative; height: 100vh; height: 100svh; overflow: hidden; background: #f4f6fa; }
 .hero-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .hero::after { content: ""; position: absolute; inset: auto 0 0 0; height: 14vh; z-index: 2; pointer-events: none; background: linear-gradient(to bottom, transparent, var(--crimson)); }
-.hero-tag { display: none; }
 @media (max-aspect-ratio: 1/1) {
   .hero-cue { top: 40%; bottom: auto; left: 24px; transform: none; justify-items: start; color: var(--ink); text-shadow: none; }
   .hero-cue i { background: linear-gradient(to bottom, var(--ink), transparent); }
-  .hero-tag { display: block; position: absolute; z-index: 2; top: 17%; left: 24px; right: 24px; margin: 0; font-family: var(--font-serif); font-style: italic; font-weight: 300; font-size: clamp(2.6rem, 12.5vw, 3.8rem); line-height: 1.02; letter-spacing: -0.01em; color: var(--ink); pointer-events: none; }
 }
 .hero-cue { position: absolute; left: 50%; bottom: clamp(26px, 6vh, 56px); z-index: 3; transform: translateX(-50%); display: grid; justify-items: center; gap: 8px; pointer-events: none; font-size: 0.82rem; letter-spacing: 0.08em; color: #fff; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5); }
 .hero-cue i { width: 1.5px; height: 44px; background: linear-gradient(to bottom, #fff, transparent); transform-origin: top; animation: cue 2.2s ease-in-out infinite; }
 @keyframes cue { 0% { transform: scaleY(0); } 55% { transform: scaleY(1); } 100% { transform: scaleY(1); opacity: 0; } }
-
-/* ---------- hero text reveal ---------- */
-/* The frames already carry the ECHOFY wordmark across the middle, so the copy sits in the clear space above it. */
-.hero-copy { position: absolute; z-index: 3; left: clamp(20px, 5vw, 80px); top: max(11vh, 84px); width: min(52vw, 760px); text-align: left; pointer-events: none; }
-.hero-rise { opacity: 0; will-change: transform, opacity; }
-.hero-headline-label { margin: 0 0 8px; font-family: var(--font-display); font-weight: 400; text-transform: uppercase; letter-spacing: 0.08em; font-size: clamp(0.85rem, 2vh, 1.1rem); color: var(--ink); opacity: 0.7; }
-.hero-headline-main { margin: 0; font-family: var(--font-serif); font-style: italic; font-weight: 300; font-size: clamp(2rem, min(4.4vw, 5.4vh), 3.6rem); line-height: 1.06; letter-spacing: -0.01em; color: var(--ink); }
-.hero-subhead { margin-top: 14px; }
-.hero-subhead p { margin: 0; font-family: var(--font-body); font-size: clamp(1rem, 2.3vh, 1.2rem); line-height: 1.5; color: var(--ink); opacity: 0.8; }
-.hero-tagline { display: none; margin-top: 14px; }
-.hero-tagline p { margin: 0; font-family: var(--font-body); font-size: 0.92rem; line-height: 1.5; color: var(--ink); opacity: 0.6; }
-
-/* Portrait screens: the big static tagline above already says "Dub once...", so only the supporting lines rise in below it. */
-@media (max-aspect-ratio: 1/1) {
-  .hero-copy { left: 24px; right: 24px; width: auto; top: 47%; }
-  .hero-headline { display: none; }
-  .hero-subhead { margin-top: 0; }
-  .hero-tagline { display: block; }
-}
 
 /* ---------- equaliser loader ---------- */
 .eql { display: flex; flex-direction: column; align-items: center; gap: 18px; }

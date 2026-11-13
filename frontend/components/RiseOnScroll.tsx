@@ -3,7 +3,7 @@ import { useEffect } from "react";
 
 const TARGETS = [
   ".grad-title", ".up-card", ".section-title", ".showcase-note",
-  ".footer-title", ".footer p", ".socials li",
+  ".footer-title", ".footer p", ".socials li", ".wordmark",
 ].join(",");
 
 /** Headings and copy rise into place the first time they scroll into view. */
@@ -17,7 +17,7 @@ export default function RiseOnScroll() {
         e.target.classList.add("rise-in");
         io.unobserve(e.target);
       }),
-      { threshold: 0.15, rootMargin: "0px 0px -8% 0px" },
+      { threshold: 0.1 },
     );
     const scan = () => document.querySelectorAll(TARGETS).forEach((el) => {
       if (seen.has(el) || el.closest(".hero")) return;

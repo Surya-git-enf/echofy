@@ -19,12 +19,15 @@ const combina = localFont({
 
 const siteTitle = "𝙀𝙘𝙝𝙤𝙛𝙮 - 𝘼𝙄 𝙙𝙪𝙗𝙗𝙞𝙣𝙜 𝙨𝙩𝙪𝙙𝙞𝙤";
 const siteDescription = "Upload a video and get it back in Hindi, Telugu, Tamil and more, with a distinct voice for every person on screen.";
-const siteImageUrl = "https://echofy-eight.vercel.app/logo.png";
+// 1200x630 copy of og-image.png, small enough (about 100 KB) for WhatsApp and other apps that skip big previews.
+// The query string makes apps fetch it fresh instead of reusing the old logo preview.
+const siteImageUrl = "https://echofy-eight.vercel.app/og-share.jpg?v=2";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://echofy-eight.vercel.app"),
   title: siteTitle,
   description: siteDescription,
+  icons: { icon: "/logo.png", apple: "/logo.png" },
   openGraph: {
     title: siteTitle,
     siteName: siteTitle,
@@ -37,7 +40,7 @@ export const metadata: Metadata = {
         url: siteImageUrl,
         width: 1200,
         height: 630,
-        type: "image/png",
+        type: "image/jpeg",
         alt: "Echofy - AI dubbing studio",
       },
     ],
@@ -51,7 +54,7 @@ export const metadata: Metadata = {
         url: siteImageUrl,
         width: 1200,
         height: 630,
-        type: "image/png",
+        type: "image/jpeg",
         alt: "Echofy - AI dubbing studio",
       },
     ],

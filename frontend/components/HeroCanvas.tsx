@@ -7,7 +7,8 @@ import { FRAME_COUNT } from "@/lib/media";
 
 gsap.registerPlugin(ScrollTrigger);
 
-const PIN_VH = 400;       // scroll distance the hero is pinned for
+const PIN_VH = 400;       // scroll distance the hero is pinned for, in screen heights x 100 (desktop)
+const PIN_VH_PORTRAIT = 300; // phones: a shorter pin, since a thumb flick covers less ground
 const FOLLOW = 9;         // how quickly the picture chases the scroll position (higher = snappier)
 const BG = "#f4f6fa";
 
@@ -100,7 +101,7 @@ export default function HeroCanvas({ onEnd }: { onEnd: () => void }) {
     const trigger = ScrollTrigger.create({
       trigger: sectionRef.current,
       start: "top top",
-      end: `+=${PIN_VH}%`,
+      end: () => `+=${window.innerWidth < window.innerHeight ? PIN_VH_PORTRAIT : PIN_VH}%`,
       pin: true,
       pinSpacing: true,
       scrub: true,

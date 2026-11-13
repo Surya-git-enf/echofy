@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { absoluteUrl, getJob, LANGUAGES, MAX_UPLOAD_BYTES, readDuration, startDub } from "@/lib/api";
 import { costFor, CREDITS_PER_MINUTE, refund, spend, useCredits } from "@/lib/credits";
+import { scrollToTarget } from "@/lib/smoothScroll";
 import EqualizerLoader from "./EqualizerLoader";
 import LanguageSelect from "./LanguageSelect";
 
@@ -55,6 +56,7 @@ export default function UploadStudio() {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<number | null>(null);
+  const outputRef = useRef<HTMLDivElement>(null);
 
   const stopPoll = () => { if (pollRef.current) { window.clearInterval(pollRef.current); pollRef.current = null; } };
 
@@ -126,6 +128,12 @@ export default function UploadStudio() {
       ? phase.fraction >= 1 ? "Waking the studio. This can take a minute." : `Uploading ${pct}%`
       : phase.kind === "processing" ? `${phase.stage} · ${pct}%` : "";
 
+  // Bring the finished video into view once it appears below the upload card.
+  const finished = phase.kind === "done";
+  useEffect(() => {
+    if (finished) window.setTimeout(() => scrollToTarget("#result"), 250);
+  }, [finished]);
+
   return (
     <section className="upload" id="dub">
       <div className="smoke" aria-hidden="true" />
@@ -187,7 +195,7 @@ export default function UploadStudio() {
       </div>
 
       {phase.kind === "done" && (
-        <div className="output">
+        <div className="output" id="result" ref={outputRef}>
           <h2 className="grad-title">Here it is</h2>
           <video src={phase.url} controls playsInline className="output-video" />
           <button type="button" className="btn-grad" onClick={() => saveVideo(phase.url, phase.name)}>Download video</button>

@@ -21,4 +21,4 @@ export const SHOWCASE_VIDEOS = [1, 2, 3, 4, 5].map((n) => ({
 export const PRELOAD_IMAGES = ["/logo.png", "/cards/card1.png", "/cards/card3.png", "/scratch/cover.webp", "/scratch/won.webp"];
 
 export const INSTAGRAM_URL = "https://www.instagram.com/itz_surya.13?mdxt=MWp0YzZ6cTJyMTJ0aQ==";
-export const DISCORD_HANDLE = "ayrus0101";
+export const DISCORD_URL = "https://discord.gg/Wgf22RFQ";

@@ -1,26 +1,55 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { absoluteUrl, getJob, LANGUAGES, MAX_UPLOAD_BYTES, readDuration, startDub } from "@/lib/api";
+import { absoluteUrl, getJob, MAX_UPLOAD_BYTES, readDuration, startDub, warmUp } from "@/lib/api";
 import { costFor, CREDITS_PER_MINUTE, refund, spend, useCredits } from "@/lib/credits";
 import { scrollToTarget } from "@/lib/smoothScroll";
 import EqualizerLoader from "./EqualizerLoader";
 import LanguageSelect from "./LanguageSelect";
 
+// One phrase per 10% of the dub, in order.
 const PHRASES = [
-  "Cooking up your dub... 🔥",
-  "Giving your video a new voice...",
-  "Voice makeover in progress...",
-  "Making language barriers disappear...",
-  "Your video is going global...",
-  "Syncing the vibes...",
-  "Bringing your words to life...",
-  "Almost ready to break language barriers...",
+  "Warming up the studio. This may take a while, grab a coffee ☕",
+  "Listening closely to every word you said 🎧",
+  "Working out who is who, so everyone gets their own voice 🎭",
+  "Writing the lines the way people really talk ✍️",
+  "Keeping names and English words exactly as they are 🔤",
+  "Halfway there. Stretch your legs, we are still cooking 🔥",
+  "Recording the new voices, one line at a time 🎙️",
+  "Fitting every line to your video's timing ⏱️",
+  "Mixing the new voices over your original music 🎶",
+  "Final polish, almost ready 🎬",
 ];
+
+/**
+ * Progress that never looks frozen. It follows the server's number, but between updates
+ * (a long stage can sit at one value for minutes) it creeps forward slowly, never past
+ * the next few percent and never backwards. Resets when `key` changes.
+ */
+function useSmoothProgress(real: number, active: boolean, key: string) {
+  const [shown, setShown] = useState(real);
+  const realRef = useRef(real);
+  realRef.current = real;
+
+  useEffect(() => { setShown(real); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [key]);
+  useEffect(() => {
+    if (!active) return;
+    const t = window.setInterval(() => {
+      setShown((s) => {
+        const r = realRef.current;
+        if (s < r) return Math.min(r, s + Math.max(0.5, (r - s) * 0.35));
+        const cap = Math.min(97, r + 8);
+        return s + Math.max(0, (cap - s) * 0.025);
+      });
+    }, 500);
+    return () => window.clearInterval(t);
+  }, [active]);
+  return shown;
+}
 
 type Phase =
   | { kind: "idle"; error?: string }
   | { kind: "ready"; file: File; seconds: number }
-  | { kind: "uploading"; file: File; fraction: number }
+  | { kind: "uploading"; file: File; fraction: number; waking?: boolean }
   | { kind: "processing"; name: string; stage: string; progress: number }
   | { kind: "done"; name: string; url: string }
   | { kind: "failed"; message: string };
@@ -87,6 +116,8 @@ export default function UploadStudio() {
     pollRef.current = window.setInterval(tick, 2500);
   }, []);
 
+  useEffect(() => { warmUp(); }, []);
+
   useEffect(() => {
     const saved = loadJob();
     if (saved) { setPhase({ kind: "processing", name: saved.name, stage: "Reconnecting", progress: 0 }); poll(saved); }
@@ -109,7 +140,12 @@ export default function UploadStudio() {
     const { file } = phase;
     setPhase({ kind: "uploading", file, fraction: 0 });
     try {
-      const id = await startDub(file, language, (fraction) => setPhase({ kind: "uploading", file, fraction }));
+      const id = await startDub(
+        file,
+        language,
+        (fraction) => setPhase((p) => ({ kind: "uploading", file, fraction, waking: p.kind === "uploading" ? p.waking : false })),
+        (waking) => setPhase((p) => ({ kind: "uploading", file, fraction: p.kind === "uploading" ? p.fraction : 0, waking })),
+      );
       if (!spend(cost)) throw new Error("Not enough credits.");
       const job = { id, cost, name: file.name };
       saveJob(job);
@@ -122,11 +158,14 @@ export default function UploadStudio() {
   const reset = () => { stopPoll(); saveJob(null); setPhase({ kind: "idle" }); if (inputRef.current) inputRef.current.value = ""; };
 
   const busy = phase.kind === "uploading" || phase.kind === "processing";
-  const pct = phase.kind === "uploading" ? Math.round(phase.fraction * 100) : phase.kind === "processing" ? Math.round(phase.progress) : 0;
+  const realPct = phase.kind === "uploading" ? phase.fraction * 100 : phase.kind === "processing" ? phase.progress : 0;
+  const shownPct = useSmoothProgress(realPct, phase.kind === "processing", phase.kind === "processing" ? phase.name : phase.kind);
+  const pct = Math.round(phase.kind === "processing" ? shownPct : realPct);
   const stageText =
     phase.kind === "uploading"
-      ? phase.fraction >= 1 ? "Waking the studio. This can take a minute." : `Uploading ${pct}%`
-      : phase.kind === "processing" ? `${phase.stage} · ${pct}%` : "";
+      ? phase.waking ? "Waking the studio. This can take up to a minute."
+        : phase.fraction >= 1 ? "Upload complete. Starting your dub." : `Uploading ${pct}%`
+      : phase.kind === "processing" ? phase.stage : "";
 
   // Bring the finished video into view once it appears below the upload card.
   const finished = phase.kind === "done";
@@ -172,7 +211,9 @@ export default function UploadStudio() {
 
         {busy && (
           <div className="busy">
-            <EqualizerLoader phrases={PHRASES} progress={pct / 100} showPercent />
+            {phase.kind === "processing"
+              ? <EqualizerLoader phrases={PHRASES} progress={pct / 100} showPercent />
+              : <EqualizerLoader caption={phase.kind === "uploading" && phase.waking ? "Waking the studio..." : "Uploading your video..."} progress={pct / 100} showPercent />}
             <p className="note" role="status">{stageText}</p>
           </div>
         )}

@@ -231,30 +231,26 @@ button, select { font: inherit; }
   .orbit-ring { width: 150px; height: 267px; }
   .orbit::before { top: calc(50% + 120px); }
 }
-/* ---------- language select (Apple-style native select) ---------- */
-.lang-select-wrapper { position: relative; width: 100%; max-width: 420px; }
+/* ---------- language select (custom dropdown, opens below) ---------- */
+.lang-select { position: relative; z-index: 20; width: 100%; max-width: 420px; text-align: left; }
 .lang-select-label { display: block; margin-bottom: 8px; font-size: 0.9rem; color: #4a5a6a; font-weight: 500; }
-.lang-select-trigger { position: relative; display: grid; grid-template-areas: "select"; align-items: center; min-height: 56px; padding: 0 18px; border-radius: 16px; border: 1.5px solid #cdd7e1; background: #fff; cursor: pointer; transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease; touch-action: manipulation; }
-.lang-select-trigger:hover:not(.disabled) { border-color: var(--blue-light); }
-.lang-select-trigger.focused { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(0, 123, 167, 0.18); }
-.lang-select-trigger.open .lang-select-chevron { transform: rotate(180deg); }
-.lang-select-trigger.disabled { opacity: 0.5; cursor: not-allowed; }
-.lang-select-native { grid-area: select; appearance: none; -webkit-appearance: none; -moz-appearance: none; background: transparent; border: 0; padding: 0; margin: 0; font: inherit; color: transparent; width: 100%; height: 100%; cursor: pointer; z-index: 2; }
-.lang-select-native:focus { outline: none; }
-.lang-select-native option { color: var(--ink); padding: 12px 16px; font-size: 1rem; }
-.lang-select-display { grid-area: select; display: flex; flex-direction: column; gap: 2px; pointer-events: none; z-index: 1; }
+.lang-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 58px; padding: 8px 18px; border-radius: 16px; border: 1.5px solid #cdd7e1; background: #fff; color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.lang-select-trigger:hover:not(:disabled) { border-color: var(--blue-light); }
+.lang-select-trigger:focus-visible, .lang-select-trigger.is-open { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(0, 123, 167, 0.18); }
+.lang-select-trigger:disabled { opacity: 0.5; cursor: not-allowed; }
+.lang-select-value { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .lang-native { font-size: 1.12rem; font-weight: 600; line-height: 1.2; }
 .lang-label { font-size: 0.72rem; color: #5b6b7b; text-transform: uppercase; letter-spacing: 0.04em; }
-.lang-select-chevron { grid-area: select; justify-self: end; width: 20px; height: 20px; color: #4a5a6a; pointer-events: none; transition: transform 0.2s ease; z-index: 1; }
-.lang-select-options { position: absolute; top: calc(100% + 8px); left: 0; right: 0; max-height: 320px; overflow-y: auto; margin: 0; padding: 8px; list-style: none; border-radius: 16px; background: #fff; border: 1.5px solid #cdd7e1; box-shadow: 0 24px 48px -24px rgba(0, 40, 100, 0.4); z-index: 50; animation: langSelectIn 0.15s ease-out; overscroll-behavior: contain; }
-@keyframes langSelectIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
-.lang-select-option { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; border-radius: 12px; cursor: pointer; transition: background 0.1s ease; }
-.lang-select-option:hover { background: rgba(0, 123, 167, 0.06); }
-.lang-select-option.selected { background: linear-gradient(120deg, rgba(0, 123, 167, 0.12), rgba(30, 176, 232, 0.08)); }
-.lang-select-option .lang-native { font-size: 1.05rem; font-weight: 600; }
-.lang-select-option .lang-label { font-size: 0.68rem; color: #5b6b7b; text-transform: uppercase; letter-spacing: 0.04em; }
-.lang-select-option.selected .lang-native { color: var(--blue); }
-.lang-select-option.selected .lang-label { color: var(--blue-light); }
+.lang-select-chevron { flex: none; width: 20px; height: 20px; color: #4a5a6a; transition: transform 0.2s ease; }
+.lang-select-trigger.is-open .lang-select-chevron { transform: rotate(180deg); }
+.lang-select-options { position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 30; max-height: min(320px, 46svh); overflow-y: auto; margin: 0; padding: 8px; list-style: none; border-radius: 18px; background: #fff; border: 1.5px solid #cdd7e1; box-shadow: 0 28px 56px -22px rgba(0, 40, 100, 0.45); animation: langSelectIn 0.16s ease-out; overscroll-behavior: contain; }
+@keyframes langSelectIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+.lang-select-option { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 11px 44px 11px 16px; border-radius: 12px; cursor: pointer; }
+.lang-select-option.is-active { background: rgba(0, 123, 167, 0.08); }
+.lang-select-option.is-selected { background: linear-gradient(120deg, rgba(0, 123, 167, 0.14), rgba(30, 176, 232, 0.08)); }
+.lang-select-option .lang-native { font-size: 1.05rem; }
+.lang-select-option.is-selected .lang-native { color: var(--blue); }
+.lang-select-tick { position: absolute; right: 16px; top: 50%; width: 20px; height: 20px; margin-top: -10px; color: var(--blue); }
 
 /* ---------- reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {

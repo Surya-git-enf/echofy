@@ -6,16 +6,21 @@ const PILLS = 25;
 /**
  * Equalizer loader. With `progress` (0..1) each pill turns solid black in turn, so the bar
  * reads as a real progress meter. Without it the pills just pulse at half opacity.
+ * `phrases` follow the progress: with N phrases, each covers 1/N of the bar (10 phrases = one per 10%).
+ * Without progress they rotate on a timer instead.
  */
 export default function EqualizerLoader({ progress, phrases, caption, showPercent }: { progress?: number; phrases?: string[]; caption?: string; showPercent?: boolean }) {
   const [i, setI] = useState(0);
 
   useEffect(() => {
-    if (!phrases || phrases.length < 2) return;
+    if (!phrases || phrases.length < 2 || progress !== undefined) return;
     const t = window.setInterval(() => setI((n) => (n + 1) % phrases.length), 2600);
     return () => window.clearInterval(t);
-  }, [phrases]);
+  }, [phrases, progress]);
 
+  const band = phrases && progress !== undefined
+    ? Math.min(phrases.length - 1, Math.floor(Math.min(1, Math.max(0, progress)) * phrases.length))
+    : i;
   const lit = progress === undefined ? 0 : Math.round(Math.min(1, Math.max(0, progress)) * PILLS);
 
   return (
@@ -46,7 +51,7 @@ export default function EqualizerLoader({ progress, phrases, caption, showPercen
       {showPercent && progress !== undefined && (
         <p className="eql-pct" aria-hidden="true">{Math.round(Math.min(1, Math.max(0, progress)) * 100)}%</p>
       )}
-      <p className="eql-phrase" key={i} aria-live="polite">{phrases ? phrases[i] : caption}</p>
+      <p className="eql-phrase" key={band} aria-live="polite">{phrases ? phrases[band] : caption}</p>
     </div>
   );
 }

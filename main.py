@@ -26,10 +26,17 @@ MAX_UPLOAD_BYTES = 800 * 1024 * 1024  # ~800MB — enough headroom for a 20-min 
 
 app = FastAPI(title="Echofy Dubbing MVP (Supabase-backed)")
 
-origins = os.getenv("ALLOWED_ORIGINS", "*")
+# The Echofy site is always allowed, even when ALLOWED_ORIGINS on Render lists other origins
+# (comma separated). Leave ALLOWED_ORIGINS unset, or set it to *, to allow every origin.
+SITE_ORIGINS = ["https://echofy-eight.vercel.app", "http://localhost:3000"]
+origins = os.getenv("ALLOWED_ORIGINS", "*").strip()
+if origins == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = SITE_ORIGINS + [o.strip().rstrip("/") for o in origins.split(",") if o.strip() and o.strip() not in SITE_ORIGINS]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if origins == "*" else origins.split(","),
+    allow_origins=allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -180,7 +180,7 @@ def get_dub_status(job_id: str):
 
 @app.get("/")
 def status():
-    return {"status": "i am good 😊","allowed_origins=",origins}
+    return {"status": "i am good 😊","allowed_origins=":origins}
 
 
 @app.exception_handler(Exception)
